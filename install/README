@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@# @;
-
-
-1.1
-date	2010.12.07.15.07.56;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@Makeinstall.bat goes to /acc/dsc/<accelerator>/<front-end>/etc/transfer.ref
+Makeinstall.bat goes to /acc/dsc/<accelerator>/<front-end>/etc/transfer.ref
 and extracts information from this file to build a driver install script for
 the driver with name <NAME> in the local file: install.<NAME>
 
@@ -59,4 +37,3 @@ N.B. There is no write access allowed to /usr from typical front-end
 computers. All temporary files reside in /tmp
 
 Julian
-@

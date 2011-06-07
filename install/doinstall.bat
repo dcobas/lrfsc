@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@:: @;
-
-
-1.1
-date	2010.12.07.15.07.56;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@#!/bin/sh
+#!/bin/sh
 echo
 echo Build and instal $1 from transfer.ref
 echo
@@ -40,4 +18,3 @@ echo
 
 echo
 echo End $1 installation
-@
