@@ -1,31 +1,4 @@
-head	1.2;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.2
-date	2010.12.07.14.44.52;	author lewis;	state Exp;
-branches;
-next	1.1;
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.2
-log
-@*** empty log message ***
-@
-text
-@/* ****************************************************************************** */
+/* ****************************************************************************** */
 /* Lrfsc test program                                                             */
 /* Julian Lewis Mon 9th June 2008. First Version implemented.                     */
 /* Tue 7th December 1010, Ported from LynxOs to Linux using one /dev per module.  */
@@ -1772,46 +1745,3 @@ unsigned int tm;
       printf("No valid diagnostics available\n");
    return arg;
 }
-@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@d17 1
-a17 1
-#define CONF_DIR "/dsc/local/data/lrfsc"
-a48 21
-/* ================================== */
-/* Launch a task                      */
-
-static void Launch(char *txt) {
-pid_t child;
-int i;
-
-   if ((child = fork()) == 0) {
-      if ((child = fork()) == 0) {
-	 for (i=0; i<modules; i++) {
-	    if (handles[i]) {
-	       close(handles[i]);
-	    }
-	 }
-	 system(txt);
-	 exit (127);
-      }
-      exit (0);
-   }
-}
-
-d178 1
-a178 1
-	 Launch(cmd);
-d247 1
-a247 1
-   else if (eflg == 4) editor = "vi";
-d313 4
-a1682 1
-   dbuf.Choice = v->Number;
-@

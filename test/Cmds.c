@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@/*****************************************************************/
+/*****************************************************************/
 /* Command routines, one per command. They get an index into the */
 /* vlaues array as argument. They process their arguments and    */
 /* return the new argumnet index.                                */
@@ -168,4 +146,3 @@ int Atoms(int arg) {
    return(arg+1);
 }
 
-@

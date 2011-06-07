@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@/*******************************************************************/
+/*******************************************************************/
 /* Print out the command line atome in vals array                  */
 /*******************************************************************/
 
@@ -77,7 +55,7 @@ OprId oid;
 	 break;
 
       case Terminator:        /* End of program */
-	 printf("Arg: %2d End: @@\n",i+1);
+	 printf("Arg: %2d End: @\n",i+1);
 	 break;
 
       default:
@@ -85,4 +63,3 @@ OprId oid;
       };
    };
 }
-@

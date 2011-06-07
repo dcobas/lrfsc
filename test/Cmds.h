@@ -1,31 +1,4 @@
-head	1.2;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.2
-date	2010.12.07.14.44.52;	author lewis;	state Exp;
-branches;
-next	1.1;
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.2
-log
-@*** empty log message ***
-@
-text
-@/**************************************************************************/
+/**************************************************************************/
 /* Command line stuff                                                     */
 /**************************************************************************/
 
@@ -270,20 +243,3 @@ static ArgVal *vals = val_bufs[0];
 #define True 1
 #define False 0
 #endif
-@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@d76 1
-a78 2
-   CmdQFL,     /* Queue flag on off */
-   CmdLSCL,    /* List clients */
-d141 1
-a141 1
-   { CmdWINT,    "wi",    "Wait for interrupt"       ,"?|-|<IntMsk>",WaitInterrupt },
-d163 1
-@

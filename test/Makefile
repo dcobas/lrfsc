@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@# @;
-
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@#================================================================
+#================================================================
 # Makefile to produce lrfsc driver test program
 #================================================================
 
@@ -47,4 +25,3 @@ all: $(ALL)
 lrfsctest.$(CPU).o: $(SRCS) $(HDRS)
 
 lrfsctest.$(CPU): lrfsctest.$(CPU).o
-@

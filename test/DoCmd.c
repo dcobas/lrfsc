@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.1
-date	2010.12.07.10.45.24;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@/**************************************************************************/
+/**************************************************************************/
 /* Do the command at arg, count times                                     */
 /* Returns end arg index                                                  */
 /**************************************************************************/
@@ -66,4 +44,3 @@ AtomType at;
       }
    }
 }
-@
