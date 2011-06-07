@@ -1,26 +1,4 @@
-head	1.1;
-access;
-symbols;
-locks; strict;
-comment	@ * @;
-
-
-1.1
-date	2010.12.06.16.05.29;	author lewis;	state Exp;
-branches;
-next	;
-
-
-desc
-@@
-
-
-1.1
-log
-@Initial revision
-@
-text
-@/* ============================================================================ */
+/* ============================================================================ */
 /* Access library routines for the LRFSC                                        */
 /* Julian Lewis Mon 23rd June 2008                                              */
 /* ============================================================================ */
@@ -147,4 +125,3 @@ LibLrfscError LibLrfscGetDiagnostics(void *handle, int module, LrfscDrvrDiagBuf 
 LibLrfscError LibLrfscSetCycle(void *handle, int module, int cycle);
 
 #endif
-@
