@@ -1,0 +1,1 @@
+cmd_/acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/driver/lrfscdrvr.ko := ld -m elf_i386 -r -m elf_i386   -o /acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/driver/lrfscdrvr.ko /acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/driver/lrfscdrvr.o /acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/driver/lrfscdrvr.mod.o

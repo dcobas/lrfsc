@@ -1,0 +1,2 @@
+plot "/acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/test/config/OutputI.00.1" with line,"/acc/src/dsc/drivers/cohtdrep/lewis/coht/lrfsc/test/config/OutputQ.00.1" with line
+pause -1
