@@ -1,0 +1,42 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2008.06.09.14.14.53;	author lewis;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************************/
+/* Open the Lrfsc driver                                                  */
+/**************************************************************************/
+
+#include <lrfscdrvr.h>
+
+int LrfscOpen() {
+
+char fnm[32];
+int  i, fn;
+
+   for (i = 1; i <= LrfscDrvrCLIENT_CONTEXTS; i++) {
+      sprintf(fnm,"/dev/lrfsc.%1d",i);
+      if ((fn = open(fnm,O_RDWR,0)) > 0) {
+	 return(fn);
+      }
+   }
+   return 0;
+}
+@
