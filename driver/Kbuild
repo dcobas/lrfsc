@@ -1,3 +1,0 @@
-EXTRA_CFLAGS += -DCOMPILE_TIME=$(shell date +%s) -g -Wall -I/acc/src/dsc/drivers/vmebridge/driver
-
-obj-m:=lrfscdrvr.o

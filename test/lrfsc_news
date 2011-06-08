@@ -1,4 +1,0 @@
-Driver, library and test program was ported
-from LynxOs to Linux on the 7th December 2010.
-
-There is now one node in /dev for each module.
