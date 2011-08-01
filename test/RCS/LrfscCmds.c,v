@@ -1,0 +1,4383 @@
+head	1.18;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.18
+date	2011.07.21.08.36.50;	author lewis;	state Exp;
+branches;
+next	1.17;
+
+1.17
+date	2011.07.11.14.02.11;	author lewis;	state Exp;
+branches;
+next	1.16;
+
+1.16
+date	2011.06.22.14.03.26;	author lewis;	state Exp;
+branches;
+next	1.15;
+
+1.15
+date	2008.06.23.14.04.30;	author lewis;	state Exp;
+branches;
+next	1.14;
+
+1.14
+date	2008.06.23.13.30.23;	author lewis;	state Exp;
+branches;
+next	1.13;
+
+1.13
+date	2008.06.23.09.51.23;	author lewis;	state Exp;
+branches;
+next	1.12;
+
+1.12
+date	2008.06.20.17.22.27;	author lewis;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2008.06.16.16.59.49;	author lewis;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2008.06.12.15.38.19;	author lewis;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2008.06.12.14.53.55;	author lewis;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2008.06.12.14.37.56;	author lewis;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2008.06.12.09.55.20;	author lewis;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2008.06.12.09.45.12;	author lewis;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2008.06.12.09.20.15;	author lewis;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2008.06.12.08.53.59;	author lewis;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2008.06.11.15.13.23;	author lewis;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2008.06.11.13.41.28;	author lewis;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2008.06.10.08.38.19;	author lewis;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.18
+log
+@Change diagnostic logic
+@
+text
+@/* ****************************************************************************** */
+/* Lrfsc test program                                                             */
+/* Julian Lewis Mon 9th June 2008. First Version implemented.                     */
+/* ****************************************************************************** */
+
+/* Environment: This test program expects read write access to a temp directory,  */
+/*              and read access to a permanent directory containing binaries and  */
+/*              configuration data. See TEMP_DIR & CONF_DIR below.                */
+
+#ifndef COMPILE_TIME
+#define COMPILE_TIME 0
+#endif
+
+#define LN 128
+#define TEMP_DIR "/tmp"
+#define CONF_DIR "/dsc/local/data/lrfsc"
+
+/* ****************************************************************************** */
+
+#include <lrfscdrvr.h>
+#include <lrfscdrvrP.h>
+
+static int module = 1;
+static char *editor = "e";
+static char *intr_names[LrfscDrvrINTERRUPTS] = { "RfPulse", "StartCycle" };
+
+/* ================================== */
+/* Launch a task                      */
+
+static void Launch(char *txt) {
+pid_t child;
+
+   if ((child = fork()) == 0) {
+      if ((child = fork()) == 0) {
+	 close(lrfsc);
+	 system(txt);
+	 exit (127);
+      }
+      exit (0);
+   }
+}
+
+/**************************************************************************/
+
+char *defaultconfigpath = "/usr/local/drivers/lrfsc/lrfsctest.config";
+
+char *configpath = NULL;
+char localconfigpath[128];  /* After a CD */
+
+static char path[128];
+
+/**************************************************************************/
+/* Look in the config file to get paths to data needed by this program.   */
+/* If no config path has been set up by the user, then ...                */
+/* First try the current working directory, if not found try TEMP, and if */
+/* still not found try CONF                                               */
+
+
+char *GetFile(char *name) {
+
+FILE *gpath = NULL;
+char txt[128];
+int i, j;
+
+   if (configpath) {
+      gpath = fopen(configpath,"r");
+      if (gpath == NULL) configpath = NULL;
+   }
+
+   if (configpath == NULL) {
+      configpath = "./lrfsctest.config";
+      gpath = fopen(configpath,"r");
+      if (gpath == NULL) {
+	 configpath = CONF_DIR "/lrfsctest.config";
+	 gpath = fopen(configpath,"r");
+	 if (gpath == NULL) {
+	    configpath = defaultconfigpath;
+	    gpath = fopen(configpath,"r");
+	    if (gpath == NULL) {
+	       configpath = NULL;
+	       sprintf(path,"./%s",name);
+	       return path;
+	    }
+	 }
+      }
+   }
+
+   bzero((void *) path,128);
+
+   while (1) {
+      if (fgets(txt,128,gpath) == NULL) break;
+      if (strncmp(name,txt,strlen(name)) == 0) {
+	 for (i=strlen(name); i<strlen(txt); i++) if (txt[i] != ' ') break;
+	 j= 0;
+	 while ((txt[i] != ' ') && (txt[i] != 0)) {
+	    path[j] = txt[i];
+	    j++; i++;
+	 }
+	 strcat(path,name);
+	 fclose(gpath);
+	 return path;
+      }
+   }
+   fclose(gpath);
+   return NULL;
+}
+
+/**************************************************************************/
+/* This routine handles getting File Names specified optionally on the    */
+/* command line where an unusual file is specified not handled in GetFile */
+
+char *GetFileName(int *arg) {
+
+ArgVal   *v;
+AtomType  at;
+char     *cp;
+int       n, earg;
+
+   /* Search for the terminator of the filename or command */
+
+   for (earg=*arg; earg<pcnt; earg++) {
+      v = &(vals[earg]);
+      if ((v->Type == Close)
+      ||  (v->Type == Terminator)) break;
+   }
+
+   n = 0;
+   bzero((void *) path,128);
+
+   v = &(vals[*arg]);
+   at = v->Type;
+   if ((v->Type != Close)
+   &&  (v->Type != Terminator)) {
+
+      bzero((void *) path, 128);
+
+      cp = &(cmdbuf[v->Pos]);
+      do {
+	 at = atomhash[(int) (*cp)];
+	 if ((at != Seperator)
+	 &&  (at != Close)
+	 &&  (at != Terminator))
+	    path[n++] = *cp;
+	 path[n] = 0;
+	 cp++;
+      } while ((at != Close) && (at != Terminator));
+   }
+   if (n) {
+      *arg = earg;
+      return path;
+   }
+   return NULL;
+}
+
+/* ======================================= */
+/* GNU plot launcher                       */
+
+void GnuPlot() {
+
+char cmd[LN];
+char tmp[LN];
+char *cp;
+
+   cp = GetFile("Plot");
+   if (cp) {
+      strcpy(tmp,cp);
+
+      cp = GetFile("gnuplot");
+      if (cp) {
+	 sprintf(cmd,"%s %s",cp,tmp);
+	 printf("Launching: %s\n",cmd);
+	 Launch(cmd);
+	 printf("Type <CR> to end display\n");
+      }
+   }
+}
+
+/**************************************************************************/
+/* Print out driver IOCTL error messages.                                 */
+
+static void IErr(char *name, int *value) {
+
+   if (value != NULL)
+      printf("LrfscDrvr: [%02d] ioctl=%s arg=%d :Error\n",
+	     (int) lrfsc, name, (int) *value);
+   else
+      printf("LrfscDrvr: [%02d] ioctl=%s :Error\n",
+	     (int) lrfsc, name);
+   perror("LrfscDrvr");
+}
+
+/*****************************************************************/
+/* News                                                          */
+
+int News(int arg) {
+
+char sys[128], npt[128];
+
+   arg++;
+
+   if (GetFile("lrfsc_news")) {
+      strcpy(npt,path);
+      sprintf(sys,"%s %s",GetFile(editor),npt);
+      printf("\n%s\n",sys);
+      system(sys);                  \
+      printf("\n");
+   }
+   return(arg);
+}
+
+/**************************************************************************/
+
+static int yesno=1;
+
+static int YesNo(char *question, char *name) {
+
+int yn, c;
+
+   if (yesno == 0) return 1;
+
+   printf("%s: %s\n",question,name);
+   printf("Continue (Y/N):"); yn = getchar(); c = getchar();
+   if ((yn != (int) 'y') && (yn != 'Y')) return 0;
+   return 1;
+}
+
+/*****************************************************************/
+/* Commands used in the test program.                            */
+/*****************************************************************/
+
+int ChangeEditor(int arg) {
+
+static int eflg = 0;
+
+   arg++;
+   if (eflg++ > 4) eflg = 1;
+
+   if      (eflg == 1) editor = "e";
+   else if (eflg == 2) editor = "emacs";
+   else if (eflg == 3) editor = "nedit";
+   else if (eflg == 4) editor = "vi";
+
+   printf("Editor: %s\n",GetFile(editor));
+   return arg;
+}
+
+/******************************************************************/
+/* Convert an IQ pair to a string                                 */
+/******************************************************************/
+
+char *IQToStr(LrfscDrvrIQPair iq) {
+	
+double phs, amp;
+static char res[64];
+	
+   phs = 0; if (iq.I) phs = atan((float) (iq.Q/iq.I));
+   amp = sqrt(iq.I*iq.I + iq.Q*iq.Q);
+
+   bzero((void *) res, 64);
+   sprintf(res,"I:%06d Q:%06d Phase:%6.3f Ampl:%6.3f",iq.I,iq.Q,phs,amp);
+   return res;
+}
+
+/*****************************************************************/
+/* Set the config file path to user specified path               */
+
+int ChangeDirectory(int arg) {
+
+char txt[128], *cp;
+
+   arg++;
+
+   cp = GetFileName(&arg);
+   if (cp) {
+      strcpy(txt,cp);
+      if (YesNo("Change lrfsctest config to:",txt)) {
+	 configpath = localconfigpath;
+	 strcpy(configpath,txt);
+      }
+   } else configpath = NULL;
+
+   sprintf(txt,"%s %s",GetFile(editor),configpath);
+   printf("\n%s\n",txt);
+   system(txt);
+   printf("\n");
+   return(arg);
+}
+
+/*****************************************************************/
+/* Select a LRFSC module.                                        */
+
+int Module(int arg) {
+
+ArgVal   *v;
+AtomType  at;
+int mod, cnt;
+LrfscDrvrModuleAddress mad;
+
+   arg++;
+
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      if (v->Number) {
+	 mod = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod) < 0) {
+	    IErr("SET_MODULE",&mod);
+	    return arg;
+	 }
+      }
+      module = mod;
+   }
+
+   cnt = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt) < 0) {
+      IErr("GET_MODULE_COUNT",NULL);
+      return arg;
+   }
+
+   for (mod=1; mod<=cnt; mod++) {
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod);
+      ioctl(lrfsc,LrfscDrvrGET_MODULE_ADDRESS,&mad);
+      printf("Module:%d Adr:0x%08X Ram:0x%08X Vec:0x%02X Lvl:0x%1X",
+	     (int) mod,
+	     (int) mad.VMEAddress,
+	     (int) mad.RamAddress,
+	     (int) mad.InterruptVector,
+	     (int) mad.InterruptLevel);
+      if (mod == module) printf(" <<==");
+      printf("\n");
+   }
+   ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int NextModule(int arg) {
+
+int cnt;
+
+   arg++;
+
+   ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+   if (module >= cnt) {
+      module = 1;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   } else {
+      module ++;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   }
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int PrevModule(int arg) {
+
+int cnt;
+
+   arg++;
+
+   ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+   if (module > 1) {
+      module --;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   } else {
+      module = cnt;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   }
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int SwDeb(int arg) { /* Arg!=0 => On, else Off */
+
+ArgVal   *v;
+AtomType  at;
+int debug;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if (v->Number) debug = v->Number;
+      else           debug = 0;
+      if (ioctl(lrfsc,LrfscDrvrSET_SW_DEBUG,&debug) < 0) {
+	 IErr("SET_SW_DEBUG",&debug);
+	 return arg;
+      }
+   }
+   debug = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_SW_DEBUG,&debug) < 0) {
+      IErr("GET_SW_DEBUG",NULL);
+      return arg;
+   }
+   if (debug > 0) printf("Debug Level: [0x%X] On\n",debug);
+   else           printf("Debug: Disabled\n");
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int GetSetTmo(int arg) { /* Arg=0 => Timeouts disabled, else Arg = Timeout */
+
+ArgVal   *v;
+AtomType  at;
+int timeout;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      timeout = v->Number;
+      if (ioctl(lrfsc,LrfscDrvrSET_TIMEOUT,&timeout) < 0) {
+	 IErr("SET_TIMEOUT",&timeout);
+	 return arg;
+      }
+   }
+   timeout = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_TIMEOUT,&timeout) < 0) {
+      IErr("GET_TIMEOUT",NULL);
+      return arg;
+   }
+   if (timeout > 0) printf("Timeout: [%d] Enabled\n",timeout);
+   else             printf("Timeout: [%d] Disabled\n",timeout);
+
+   return arg;
+}
+
+/*****************************************************************/
+
+#define MOD_FIELDS 54
+static char *modflds[MOD_FIELDS] = {
+   "IrqSrc","State","Control","VmeIrq","RamSelect",
+   "Diag1Select","Diag2Select","Diag3Select","Diag4Select",
+   "ResCtrlTime","ResCtrl",
+   "ResFwdI","ResFwdQ","ResCavI","ResCavQ",
+   "SwitchCtrl","SoftSwitch",
+   "RefMatrixA","RefMatrixB","RefMatrixC","RefMatrixD",
+   "FwdMatrixA","FwdMatrixB","FwdMatrixC","FwdMatrixD",
+   "CavMatrixA","CavMatrixB","CavMatrixC","CavMatrixD",
+   "DiagTime",
+   "RefDiagI","RefDiagQ",
+   "FwdDiagI","FwdDiagQ",
+   "CavDiagI","CavDiagQ",
+   "ErrDiagI","ErrDiagQ",
+   "OutDiagI","OutDiagQ",
+   "POutDiagI","POutDiagQ",
+   "IOutDiagI","IOutDiagQ",
+   "KP","KI",
+   "RfOffTime",
+   "PulseNumber","NextCycle","PresentCycle",
+   "VhdlVerH","VhdlVerL",
+   "Status","RfOnMaxLength" };
+
+void EditMemory(int address, int ramflg) {
+
+LrfscDrvrRawIoBlock iob;
+unsigned short array[2];
+unsigned short addr, *data;
+char c, *cp, str[128], *fp;
+int n, radix, nadr;
+
+   printf("EditMemory: [/]: Open, [CR]: Next, [.]: Exit [x]: Hex, [d]: Dec\n\n");
+
+   data = array;
+   addr = address;
+   radix = 16;
+   c = '\n';
+
+   while (1) {
+      iob.Size = 1;
+      iob.Offset = addr;
+      iob.RamFlag = ramflg;
+      iob.UserArray = array;
+      if (ioctl(lrfsc,LrfscDrvrRAW_READ,&iob) < 0) IErr("RAW_READ",(int *) &addr);
+
+      if (ramflg) {
+	 if (addr & 1) fp = "Q:";
+	 else          fp = "I:";
+      } else           fp = modflds[addr];
+
+      if (radix == 16) {
+	 if (c=='\n') printf("%16s:Addr:0x%02x[%03d]: 0x%04x ", fp, (int) addr*2, (int) addr*2,(int) *data);
+      } else {
+	 if (c=='\n') printf("%16s:Addr:%04d: %5d ", fp, (int) addr*2,(int) *data);
+      }
+
+      c = (char) getchar();
+
+      if (c == '/') {
+	 bzero((void *) str, 128); n = 0;
+	 while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+	 nadr = strtoul(str,&cp,radix);
+	 if (cp != str) {
+	    if ((ramflg == 0) && (nadr >= MOD_FIELDS*2)) {
+	       printf("\nBad address:0x%2X[%3d]\n\n",(int) nadr, (int) nadr);
+	       nadr = addr*2;
+	    }
+	    addr = nadr/2;
+	 }
+      }
+
+      else if (c == 'x')  {radix = 16; addr--; continue; }
+      else if (c == 'd')  {radix = 10; addr--; continue; }
+      else if (c == '.')  { c = getchar(); printf("\n"); break; }
+      else if (c == '\n') {
+	 addr ++;
+	 if (ramflg == 0) {
+	    if (addr >= MOD_FIELDS) {
+	       printf("\n");
+	       addr = 0;
+	    }
+	 }
+      }
+
+      else {
+	 bzero((void *) str, 128); n = 0;
+	 str[n++] = c;
+	 while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+	 *data = strtoul(str,&cp,radix);
+	 if (cp != str) {
+	    if (ioctl(lrfsc,LrfscDrvrRAW_WRITE,&iob) < 0) IErr("RAW_WRITE",(int *) &addr);
+	 }
+      }
+   }
+}
+
+/*****************************************************************/
+
+int ModIo(int arg) { /* Address */
+
+ArgVal   *v;
+AtomType  at;
+
+   printf("RawIo on module address map\n");
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      EditMemory(v->Number/2,0);
+   } else
+      EditMemory(0,0);
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int RamIo(int arg) { /* Address */
+
+ArgVal   *v;
+AtomType  at;
+
+   printf("RawIo on module address map\n");
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      EditMemory(v->Number,1);
+   } else
+      EditMemory(0,1);
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int GetSetQue(int arg) { /* Arg=Flag */
+
+   ArgVal   *v;
+   AtomType  at;
+   long qflag, qsize, qover;
+
+   arg++;
+
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      qflag = v->Number;
+
+      if (ioctl(lrfsc,LrfscDrvrSET_QUEUE_FLAG,&qflag) < 0) {
+	 IErr("SET_QUEUE_FLAG",(int *) &qflag);
+	 return arg;
+      }
+   }
+   qflag = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+      IErr("GET_QUEUE_FLAG",NULL);
+      return arg;
+   }
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+      IErr("GET_QUEUE_SIZE",NULL);
+      return arg;
+   }
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_OVERFLOW,&qover) < 0) {
+      IErr("GET_QUEUE_OVERFLOW",NULL);
+      return arg;
+   }
+
+   if (qflag == -1) {
+      IErr("GET_QUEUE_FLAG",NULL);
+      return arg;
+   }
+
+   if (qflag == 1) printf("NoQueueFlag: Set,   Queuing is Off\n");
+   else { printf("NoQueueFlag: ReSet, Queuing is On\n");
+	  printf("QueueSize: %d\n",    (int) qsize);
+	  printf("QueueOverflow: %d\n",(int) qover);
+   }
+   return arg;
+}
+
+/*****************************************************************/
+
+int ListClients(int arg) {
+
+LrfscDrvrClientConnections cons;
+LrfscDrvrConnection *con;
+LrfscDrvrClientList clist;
+int i, j, k, pid, mypid;
+
+   arg++;
+
+   mypid = getpid();
+
+   if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_LIST,&clist) < 0) {
+      IErr("GET_CLIENT_LIST",NULL);
+      return arg;
+   }
+
+   for (i=0; i<clist.Size; i++) {
+      pid = clist.Pid[i];
+
+      bzero((void *) &cons, sizeof(LrfscDrvrClientConnections));
+      cons.Pid = pid;
+
+      if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_CONNECTIONS,&cons) < 0) {
+	 IErr("GET_CLIENT_CONNECTIONS",NULL);
+	 return arg;
+      }
+
+      if (pid == mypid) printf("Pid: %d (lrfsctest) ",pid);
+      else              printf("Pid: %d ",pid);
+
+      if (cons.Size) {
+	 for (j=0; j<cons.Size; j++) {
+	    con = &(cons.Connections[j]);
+	    printf("[Mod:%d Interrupt:0x%X]:",(int) con->Module,(int) con->Interrupt);
+	    for (k=0; k<LrfscDrvrINTERRUPTS; k++) {
+	       if ((1<<k) & con->Interrupt) {
+		  if (intr_names[k] != NULL)
+		     printf(" %s",intr_names[k]);
+		  else
+		     printf(" Bit%02d",k);
+	       }
+	    }
+	 }
+      } else printf("No connections");
+      printf("\n");
+   }
+   return arg;
+}
+
+/*****************************************************************/
+
+int Reset(int arg) {
+
+int module;
+
+   arg++;
+
+   if (ioctl(lrfsc,LrfscDrvrRESET,NULL) < 0) {
+      IErr("RESET",NULL);
+      return arg;
+   }
+
+   module = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_MODULE,&module) < 0) {
+      IErr("GET_MODULE",NULL);
+      return arg;
+   }
+
+   printf("Reset Module: %d\n",module);
+
+   return arg;
+}
+
+/*****************************************************************/
+
+#define STAT_STR_SIZE 128
+
+static char *statnames[LrfscDrvrSTATAE] = {
+   "OVER_REF",
+   "OVER_FWD",
+   "OVER_CAV",
+   "RF_TOO_LONG",
+   "NO_FAST_PROTECT",
+   "MISSING_TICK" };
+
+char *StatusToStr(unsigned long stat) {
+
+static char res[STAT_STR_SIZE];
+int i, msk;
+
+   bzero((void *) res,STAT_STR_SIZE);
+
+   for (i=0; i<LrfscDrvrSTATAE; i++) {
+      msk = 1 << i;
+      if (stat & msk) {
+	 strcat(res,statnames[i]);
+	 strcat(res,":");
+      }
+   }
+   return res;
+}
+
+/*****************************************************************/
+
+volatile char *TimeToStr(time_t tod) {
+
+static char tbuf[128];
+
+char tmp[128];
+char *yr, *ti, *md, *mn, *dy;
+
+   bzero((void *) tbuf, 128);
+   bzero((void *) tmp, 128);
+
+   if (tod) {
+      ctime_r (&tod, tmp);
+
+      tmp[3] = 0;
+      dy = &(tmp[0]);
+      tmp[7] = 0;
+      mn = &(tmp[4]);
+      tmp[10] = 0;
+      md = &(tmp[8]);
+      if (md[0] == ' ')
+	      md[0] = '0';
+      tmp[19] = 0;
+      ti = &(tmp[11]);
+      tmp[24] = 0;
+      yr = &(tmp[20]);
+
+      sprintf (tbuf, "%s-%s/%s/%s %s"  , dy, md, mn, yr, ti);
+
+   } else sprintf(tbuf, "--- Zero ---");
+
+   return (tbuf);
+}
+
+/*****************************************************************/
+
+int GetVersion(int arg) {
+
+LrfscDrvrVersion version;
+time_t tod;
+
+   arg++;
+
+   bzero((void *) &version, sizeof(LrfscDrvrVersion));
+   if (ioctl(lrfsc,LrfscDrvrGET_VERSION,&version) < 0) {
+      IErr("GET_VERSION",NULL);
+      return arg;
+   }
+
+   tod = version.Driver;
+   printf("Drvr: [%u] %s\n",(int) tod,TimeToStr(tod));
+
+   tod = version.Firmware;
+   printf("VHDL: [%u] %s\n",(int) tod,TimeToStr(tod));
+
+   tod = COMPILE_TIME;
+   printf("Test: [%u] %s\n",(int) tod,TimeToStr(tod));
+
+   return arg;
+}
+
+/*****************************************************************/
+
+static int connected = 0;
+
+int WaitInterrupt(int arg) { /* msk, pulses */
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrConnection con;
+int i, cc, qflag, qsize, nowait, interrupt, cnt;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   nowait = 0;
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("WaitInterrupt: [-] Optional No Wait, Connect only\n");
+	 printf("WaitInterrupt: Sources are:\n");
+	 for (i=0; i<LrfscDrvrINTERRUPTS; i++) {
+	    if (intr_names[i] != NULL) {
+	       printf("0x%04X %s\n",(1<<i),intr_names[i]);
+	    }
+	 }
+	 return arg;
+      }
+      if (v->OId == OprMI) {    /* A - means don't wait, just connect */
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 nowait = 1;
+      }
+   }
+
+   interrupt = 0;
+   if (at == Numeric) {
+      arg++;
+
+      if ((v->Number > 0) && (v->Number <= LrfscDrvrINTERUPT_MASK)) {
+	 interrupt     = v->Number;
+	 con.Module    = module;
+	 con.Interrupt = interrupt;
+	 con.Pulse     = LrfscDrvrPulseALL;
+
+	 v = &(vals[arg]);
+	 at = v->Type;
+	 if (at == Numeric) {
+	    arg++;
+
+	    if (v->Number <= LrfscDrvrPULSES) {
+	       arg++;
+
+	       con.Pulse = v->Number;
+	    }
+	 }
+	 if (ioctl(lrfsc,LrfscDrvrCONNECT,&con) < 0) {
+	    IErr("CONNECT",&interrupt);
+	    return arg;
+	 }
+
+	 connected = 1;
+      } else {
+	 con.Module     = module;
+	 con.Interrupt  = 0;
+	 if (ioctl(lrfsc,LrfscDrvrDISCONNECT,&con) < 0) {
+	    IErr("DISCONNECT",&interrupt);
+	    return arg;
+	 }
+	 connected = 0;
+	 printf("Disconnected from all interrupts\n");
+	 return arg;
+      }
+   }
+
+   if (connected == 0) {
+      printf("WaitInterrupt: Error: No connections to wait for\n");
+      return arg;
+   }
+
+   if (nowait) {
+      printf("WaitInterrupt: Connect: No Wait: OK\n");
+      return arg;
+   }
+
+   cnt = 0;
+   do {
+      cc = read(lrfsc,&con,sizeof(LrfscDrvrConnection));
+      if (cc <= 0) {
+	 printf("Time out or Interrupted call\n");
+	 return arg;
+      }
+      if (interrupt != 0) {
+	 if (con.Interrupt & interrupt) break;
+      } else break;
+      if (cnt++ > 64) {
+	 printf("Aborted wait loop after 64 iterations\n");
+	 return arg;
+      }
+   } while (True);
+
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+      IErr("GET_QUEUE_FLAG",NULL);
+      return arg;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+      IErr("GET_QUEUE_SIZE",NULL);
+      return arg;
+   }
+
+   printf("Mod[%d] Int[0x%X] Pls[0x%X]\n",
+	  (int) con.Module,
+	  (int) con.Interrupt,
+	  (int) con.Pulse);
+
+   if (qflag == 0) {
+      if (qsize) printf(" Queued: %d",(int) qsize);
+   }
+   printf("\n");
+
+   return arg;
+}
+
+/*****************************************************************/
+
+int ReadStatus(int arg) { /* msk */
+
+LrfscDrvrStatus stat;
+	
+   arg++;
+
+   stat = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_STATUS,&stat) <0) {
+      IErr("GET_STATUS",NULL);
+      return arg;
+   }
+   printf("Status:[0x%2X]%s\n",(int) stat, StatusToStr((unsigned long) stat));
+   return arg;
+}
+
+/******************************************************************/
+
+static char *statenames[LrfscDrvrSTATES] = {"Config", "ProdLocal", "ProdRemote"};
+
+int GetSetState(int arg) {
+
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrState stat;
+int i;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("State Values:");
+	 for (i=0; i<LrfscDrvrSTATES; i++) {
+	    printf("%d=%s ",i,statenames[i]);
+	 }
+	 printf("\n");
+	 return arg;
+      }
+   }
+
+   if (at == Numeric) {
+      arg++;
+
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrSTATES)) {
+	 stat = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_STATE,&stat) < 0) {
+	    IErr("SET_STATE",NULL);
+	    return arg;
+	 }
+      } else printf("Illegal state value\n");
+   }
+
+   stat = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_STATE,&stat) < 0) {
+      IErr("GET_STATE", NULL);
+      return arg;
+   }
+
+   printf("State:%d=%s\n",(int) stat, statenames[(int) stat]);
+   return arg;
+}
+
+/**********************************************************************/
+
+static char *signames[LrfscDrvrDiagSIGNALS] = {"Reflected","Forward","Cavity","CavityError","Output"};
+
+int GetSetDiagChoice(int arg) {	/* Diag_number, choice */
+	
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrDiagChoices dchoice;
+LrfscDrvrDiagSignalChoice schoice;
+int i, diag, sval;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("Signals:");
+	 for (i=0; i<LrfscDrvrDiagSIGNALS; i++) {
+		 printf("%d=%s ",i,signames[i]);
+	 }
+	 printf("\n");
+	 return arg;
+      }
+   }
+
+   diag = -1;
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >=0) && (v->Number < LrfscDrvrDiagSIGNAL_CHOICES)) {
+	 diag = v->Number;
+	 v = &(vals[arg]);
+	 at = v->Type;
+      } else {
+	 printf("Illegal Diagnostic Index:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrDiagSIGNAL_CHOICES);
+	 return arg;
+      }
+   }
+
+   sval = -1;
+   schoice = LrfscDrvrDiagREFLECTED;
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrDiagSIGNALS)) {
+	 schoice = (LrfscDrvrDiagSignalChoice) v->Number;
+	 sval = (int) schoice;
+      } else {
+	 printf("Illegal Signal choice:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrDiagSIGNALS);
+	 return arg;
+      }
+   }
+
+   bzero((void *) &dchoice, sizeof(LrfscDrvrDiagChoices));
+   if (ioctl(lrfsc,LrfscDrvrGET_DIAG_CHOICE,&dchoice) < 0) {
+      IErr("GET_DIAG_CHOICE", NULL);
+      return arg;
+   }
+
+   if (sval != -1) {
+      dchoice[diag] = schoice;
+      if (ioctl(lrfsc,LrfscDrvrSET_DIAG_CHOICE,&dchoice) < 0) {
+	 IErr("SET_DIAG_CHOICE",(int *) &diag);
+	 return arg;
+      }
+   }
+
+   for (i=0; i<LrfscDrvrDiagSIGNAL_CHOICES; i++)
+      printf("Diag:%d %d=%s\n",i,dchoice[i],signames[dchoice[i]]);
+
+   return arg;
+}
+
+/***************************************************************************/
+
+int GetSetResCtrl(int arg) { /* Time, Value */
+
+ArgVal   *v;
+AtomType  at;
+LrfscDrvrResCtrl resc;
+
+   arg++;
+
+   if (at == Numeric) {
+      arg++;
+      if (v->Number < 0xFFFF) {
+
+	 if (ioctl(lrfsc,LrfscDrvrGET_RES_CTRL, &resc) < 0) {
+	    IErr("GET_RES_CTRL", NULL);
+	    return arg;
+	 }
+	 resc.Time = v->Number;
+
+	 v = &(vals[arg]);
+	 at = v->Type;
+	 if (at == Numeric) {
+	    arg++;
+	    if (v->Number < 0xFFFF) {
+	       resc.Value = v->Number;
+	    } else {
+	       printf("Illegal Control Value:%d Not in range[0..0xFFFF]\n",(int) v->Number);
+	       return arg;
+	    }
+	 }
+
+	 if (ioctl(lrfsc,LrfscDrvrSET_RES_CTRL, &resc) < 0) {
+	    IErr("SET_RES_CTRL", NULL);
+	    return arg;
+	 }
+
+      } else {
+	 printf("Illegal Control Time:%d Not in range[0..0xFFFF]\n",(int) v->Number);
+	 return arg;
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_RES_CTRL, &resc) < 0) {
+      IErr("GET_RES_CTRL", NULL);
+      return arg;
+   }
+
+   printf("ResCtrlTime:%d ResCtrlValue:%d\n",(int) resc.Time, (int) resc.Value);
+   printf("ResFwd:%s ResCav:%s\n",IQToStr(resc.Fwd),IQToStr(resc.Cav));
+   return arg;
+}
+
+/*******************************************************************************/
+
+char *anlsnames[LrfscDrvrAnalogSWITCHES] = {"RefTest","FwdTest","CavTest","OutTest"};
+
+int GetSetAnalogueSwitch(int arg) {
+	
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrAnalogSwitch anls;
+int i, msk;
+	
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("BITS:AnalogueSwitch:");
+	 for (i=0; i<LrfscDrvrAnalogSWITCHES; i++) {
+	    msk = 1<<i;
+	    printf("0x%02X=%s ",msk,anlsnames[i]);
+	 }
+	 printf("\n");
+	 return arg;
+      }
+   }
+
+   if (at == Numeric) {
+      arg++;
+      if (v->Number <= 0x0F) {
+	 anls = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_ANALOGUE_SWITCH,&anls) < 0) {
+	    IErr("SET_ANALOGUE_SWITCH",(int *) &anls);
+	    return arg;
+	 }
+      }
+   }
+
+   anls = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_ANALOGUE_SWITCH,&anls) < 0) {
+      IErr("GET_ANALOGUE_SWITCH",NULL);
+      return arg;
+   }
+   printf("BITS:AnalogueSwitch:0x%02X\n",(int) anls);
+   for (i=0; i<LrfscDrvrAnalogSWITCHES; i++) {
+      msk = 1<<i;
+      printf("0x%02X=%s =>",msk,anlsnames[i]);
+      if (msk & anls) printf("Test\n");
+      else            printf("Normal\n");
+   }
+   return arg;
+}
+	
+/*******************************************************************************/
+	
+int GetSetSoftSwitch(int arg) {
+
+	
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrSoftSwitch sfts;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if (v->Number < LrfscDrvrSoftSWITCHES) {
+	 sfts = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_SOFT_SWITCH,&sfts) < 0) {
+	    IErr("SET_SOFT_SWITCH",(int *) &sfts);
+	    return arg;
+	 }
+      }
+   }
+
+   sfts = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_SOFT_SWITCH,&sfts) < 0) {
+      IErr("GET_SOFT_SWITCH", NULL);
+      return arg;
+   }
+
+   printf("SoftSwitch:");
+   if (sfts == LrfscDrvrSotfSwitchMAIN_CLOSED) printf("Closed\n");
+   else                                        printf("Open\n");
+
+   return arg;
+}
+
+/**************************************************************************/
+
+char *matnames[LrfscDrvrMatrixMATRICES] = {"Ref","Fwd","Cav"};
+
+int GetSetCoefficients(int arg) { /* ? Matrix, A, B, C, D */
+
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrMatrixCoefficientsBuf cobuf;
+LrfscDrvrMatrixCoefficients    *matp;
+
+int i;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("Matrix:");
+	 for (i=0; i<LrfscDrvrMatrixMATRICES; i++) {
+	    printf("%d=%s ",i,matnames[i]);
+	 }
+	 printf("\n");
+	 return arg;
+      }
+   }
+
+
+   bzero((void *) &cobuf, sizeof(LrfscDrvrMatrixCoefficientsBuf));
+   matp = &(cobuf.Coeficients);
+
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >=0) && (v->Number < LrfscDrvrMatrixMATRICES)) {
+	 cobuf.Matrix = (LrfscDrvrMatrix) v->Number;
+
+	 if (ioctl(lrfsc,LrfscDrvrGET_COEFFICIENTS,&cobuf) < 0) {
+	    IErr("GET_COEFFICIENTS",NULL);
+	    return arg;
+	 }
+
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 if (at == Numeric) {
+	    arg++;
+
+	    matp->MatrixA = v->Number;
+
+	    v = &(vals[arg]);
+	    at = v->Type;
+
+	    if (at == Numeric) {
+	       arg++;
+
+	       matp->MatrixB = v->Number;
+
+	       v = &(vals[arg]);
+	       at = v->Type;
+
+	       if (at == Numeric) {
+		  arg++;
+
+		  matp->MatrixC = v->Number;
+
+		  v = &(vals[arg]);
+		  at = v->Type;
+
+		  if (at == Numeric) {
+		     arg++;
+
+		     matp->MatrixD = v->Number;
+
+		     v = &(vals[arg]);
+		     at = v->Type;
+		  }
+	       }
+	    }
+
+	    if (ioctl(lrfsc,LrfscDrvrSET_COEFFICIENTS,&cobuf) < 0) {
+	       IErr("SET_COEFFICIENTS",NULL);
+	       return arg;
+	    }
+	 }
+      }
+   }
+
+   for (i=0; i<LrfscDrvrMatrixMATRICES; i++) {
+      cobuf.Matrix = (LrfscDrvrMatrix) i;
+      if (ioctl(lrfsc,LrfscDrvrGET_COEFFICIENTS,&cobuf) < 0) {
+	 IErr("GET_COEFFICIENTS",NULL);
+	 return arg;
+      }
+      printf("Matrix:%06d:%4ss A:%06d B:%06d C:%06d D:%06d\n",
+	     i,
+	     matnames[i],
+	     matp->MatrixA,
+	     matp->MatrixB,
+	     matp->MatrixC,
+	     matp->MatrixD);
+   }
+   return arg;
+}
+
+/*****************************************************************************/
+
+int GetSetSnapShot(int arg) { /* time */
+
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrDiagSnapShot snap;
+
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   bzero((void *) &snap, sizeof(LrfscDrvrDiagSnapShot));
+
+   if (at == Numeric) {
+      snap.DiagTime = (unsigned short) v->Number;
+      if (ioctl(lrfsc,LrfscDrvrSET_SNAP_SHOT_TIME,&snap) < 0) {
+	 IErr("SET_SNAP_SHOT_TIME",(int *) &(v->Number));
+	 return arg;
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_SNAP_SHOTS,&snap) < 0) {
+      IErr("GET_SNAP_SHOT_TIME",(int *) &(v->Number));
+      return arg;
+   }
+
+   printf("SnapShotTime:%d\n",(int) snap.DiagTime);
+   printf("RefDiag:%s\n", IQToStr(snap.RefDiag));
+   printf("FwdDiag:%s\n", IQToStr(snap.FwdDiag));
+   printf("CavDiag:%s\n", IQToStr(snap.CavDiag));
+   printf("ErrDiag:%s\n", IQToStr(snap.ErrDiag));
+   printf("OutDiag:%s\n", IQToStr(snap.OutDiag));
+
+   printf("POutPic:%s\n", IQToStr(snap.POutDiag));
+   printf("IOutPic:%s\n", IQToStr(snap.IOutDiag));
+
+   return arg;
+}
+
+/*****************************************************************************/
+
+int GetSetPic(int arg) { /* KP KI */
+
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrPicSetBuf pic;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   bzero((void *) &pic, sizeof(LrfscDrvrPicSetBuf));
+
+   if (ioctl(lrfsc,LrfscDrvrGET_PIC,&pic) < 0) {
+      IErr("GET_PIC",NULL);
+      return arg;
+   }
+
+   if (at == Numeric) {
+      arg++;
+      pic.KP = (signed short) v->Number;
+      v = &(vals[arg]);
+      at = v->Type;
+      if (at == Numeric) {
+	 arg++;
+	 pic.KI = (signed short) v->Number;
+      }
+      if (ioctl(lrfsc,LrfscDrvrSET_PIC,&pic) < 0) {
+	 IErr("SET_PIC",NULL);
+	 return arg;
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_PIC,&pic) < 0) {
+      IErr("GET_PIC",NULL);
+      return arg;
+   }
+
+   printf("Pic:KI:%d KP:%d\n",(int) pic.KI, (int) pic.KP);
+   return arg;
+}
+
+/**************************************************************************/
+
+int GetSetPulseLength(int arg) { /* MaxPulseLen */
+
+ArgVal   *v;
+AtomType  at;
+
+unsigned long pl, plmx;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      plmx =  v->Number;
+      if (ioctl(lrfsc,LrfscDrvrSET_MAX_PULSE_LENGTH,&plmx) < 0) {
+	 IErr("SET_MAX_PULSE_LENGTH",(int *) &plmx);
+	 return arg;
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_MAX_PULSE_LENGTH,&plmx) < 0) {
+      IErr("GET_MAX_PULSE_LENGTH",(int *) &plmx);
+      return arg;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&pl) < 0) {
+      IErr("GET_MAX_PULSE_LENGTH",(int *) &pl);
+      return arg;
+   }
+
+   printf("PulseLength:Max:%d RFOff:%d\n",(int) plmx, (int) pl);
+
+   return arg;
+}
+
+/***********************************************************************/
+
+static long cyc = 0;
+
+int GetSetCycle(int arg) { /* NextCycle */
+
+ArgVal   *v;
+AtomType  at;
+
+unsigned long pcy, ncy;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrCYCLES)) {
+	 cyc = ncy = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_NEXT_CYCLE,&ncy) < 0) {
+	    IErr("LrfscDrvrSET_NEXT_CYCLE",(int *) &ncy);
+	    return arg;
+	 }
+
+	 printf("Cycle:Next:%d\n",(int) ncy);
+
+      } else {
+	 printf("Illegal cycle number:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrCYCLES);
+	 return arg;
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_PRES_CYCLE,&pcy) < 0) {
+      IErr("GET_PRES_CYCLE",NULL);
+      return arg;
+   }
+
+   printf("Cycle:Pres:%d\n",(int) pcy);
+
+   return arg;
+}
+
+/********************************************************************************/
+
+/* Not called by CLI directly */
+
+static LrfscDrvrConfigBuf cbuf;
+#define SET_POINTS "ConfigSetPoints"
+#define FEED_FORWARD "ConfigFeedFwd"
+
+static int WriteConfig(int arg) { /* cyc [filename] */
+
+ArgVal   *v;
+AtomType  at;
+
+FILE *fp;
+char *cp;
+
+char fnam[LN];
+int i;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrCYCLES)) {
+	 cyc = v->Number;
+
+	 cbuf.Cycle = cyc;
+	 cbuf.Points = LrfscDrvrCONFIG_POINTS;
+
+	 if (ioctl(lrfsc,LrfscDrvrGET_CYCLE_CONFIG,&cbuf) < 0) {
+	    IErr("GET_CYCLE_CONFIG",(int *) &cyc);
+	    return arg;
+	 }
+
+      } else {
+	 printf("Illegal cycle number:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrCYCLES);
+	 return arg;
+      }
+   }
+
+   cp = GetFileName(&arg);
+   if (cp == NULL) {
+      if (cbuf.Which == LrfscDrvrConfigSETPOINTS) cp = GetFile(SET_POINTS);
+      else                                        cp = GetFile(FEED_FORWARD);
+      if (cp == NULL) {
+	 printf("Couldn't locate file: %s\n",cp);
+	 return arg;
+      }
+   }
+
+   sprintf(fnam,"%s.%02d", cp, (int) cyc);
+   umask(0);
+
+   fp = fopen(fnam,"w");
+   if (fp) {
+
+      for (i=0; i<LrfscDrvrCONFIG_POINTS; i++) {
+	 fprintf(fp,"%05d %05d\n",
+		 cbuf.Array[i].I,
+		 cbuf.Array[i].Q);
+      }
+   }
+   fclose(fp);
+
+   printf("Written data to:%s\n",fnam);
+
+   return arg;
+}
+
+/********************************************************************************/
+
+int WriteSetFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigSETPOINTS;
+   return WriteConfig(arg);
+}
+
+/********************************************************************************/
+
+int WriteFwdFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigFEEDFORWARD;
+   return WriteConfig(arg);
+}
+
+/*****************************************************************/
+
+/* Not called by CLI directly */
+
+static int EditConfig(int arg) { /* cyc [filename] */
+
+ArgVal   *v;
+AtomType  at;
+
+char *cp;
+char cmbuf[LN], tmbuf[LN];
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrCYCLES)) {
+	 cyc = v->Number;
+      } else {
+	 printf("Illegal cycle number:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrCYCLES);
+	 return arg;
+      }
+   }
+
+   sprintf(tmbuf,"%s ",GetFile(editor));
+
+   cp = GetFileName(&arg);
+   if (cp == NULL) {
+      if (cbuf.Which == LrfscDrvrConfigSETPOINTS) cp = GetFile(SET_POINTS);
+      else                                        cp = GetFile(FEED_FORWARD);
+      if (cp == NULL) {
+	 printf("Couldn't locate file: %s\n",cp);
+	 return arg;
+      }
+   }
+
+   sprintf(cmbuf,"%s %s.%02d",tmbuf , cp, (int) cyc);
+
+   system(cmbuf);
+   printf("\n");
+   return arg;
+}
+
+/********************************************************************************/
+
+int EditSetFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigSETPOINTS;
+   return EditConfig(arg);
+}
+
+/********************************************************************************/
+
+int EditFwdFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigFEEDFORWARD;
+   return EditConfig(arg);
+}
+
+/********************************************************************************/
+
+/* Not called by CLI directly */
+
+static int ReadConfig(int arg) { /* cyc [filename] */
+
+ArgVal   *v;
+AtomType  at;
+
+FILE *fp;
+char *cp;
+
+char fnam[LN];
+int i, I, Q;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      if ((v->Number >= 0) && (v->Number < LrfscDrvrCYCLES)) {
+	 cyc = v->Number;
+	 cbuf.Cycle = cyc;
+	 cbuf.Points = LrfscDrvrCONFIG_POINTS;
+      } else {
+	 printf("Illegal cycle number:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrCYCLES);
+	 return arg;
+      }
+   }
+
+   cp = GetFileName(&arg);
+   if (cp == NULL) {
+      if (cbuf.Which == LrfscDrvrConfigSETPOINTS) cp = GetFile(SET_POINTS);
+      else                                        cp = GetFile(FEED_FORWARD);
+      if (cp == NULL) {
+	 printf("Couldn't locate file: %s\n",cp);
+	 return arg;
+      }
+   }
+
+   sprintf(fnam,"%s.%02d", cp, (int) cyc);
+   umask(0);
+
+   fp = fopen(fnam,"r");
+   if (fp) {
+
+      for (i=0; i<LrfscDrvrCONFIG_POINTS; i++) {
+	 fscanf(fp, "%d %d\n",&I ,&Q);
+	 cbuf.Array[i].I = (short) I;
+	 cbuf.Array[i].Q = (short) Q;
+      }
+   }
+   fclose(fp);
+
+   if (YesNo(fnam, "Write Hardware")) {
+      if (ioctl(lrfsc,LrfscDrvrSET_CYCLE_CONFIG,&cbuf) < 0) {
+	 IErr("SET_CYCLE_CONFIG",(int *) &cyc);
+	 return arg;
+      }
+   }
+   printf("Done\n");
+
+   return arg;
+}
+
+/********************************************************************************/
+
+int ReadSetFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigSETPOINTS;
+   return ReadConfig(arg);
+}
+
+/********************************************************************************/
+
+int ReadFwdFile(int arg) { /* cyc [filename] */
+
+   bzero((void *) &cbuf, sizeof(LrfscDrvrConfigBuf));
+   cbuf.Which = LrfscDrvrConfigFEEDFORWARD;
+   return ReadConfig(arg);
+}
+
+/********************************************************************************/
+
+int NextCycle(int arg) {
+
+   arg++;
+   cyc++;
+   if (cyc >= LrfscDrvrCYCLES) cyc = 0;
+   printf("Cycle:%02d\n",(int) cyc);
+   return arg;
+}
+
+/********************************************************************************/
+
+int PrevCycle(int arg) {
+
+   arg++;
+   cyc--;
+   if (cyc < 0) cyc = LrfscDrvrCYCLES;
+   printf("Cycle:%02d\n",(int) cyc);
+   return arg;
+}
+
+/********************************************************************************/
+
+static unsigned long SampStart  = 0;
+static unsigned long SampSkip   = 0;
+static unsigned long SampPulse  = LrfscDrvrPulse1;
+
+int SetSampling(int arg) { /* Start, Skip, Pulse */
+
+ArgVal   *v;
+AtomType  at;
+
+unsigned long plen;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      SampStart = v->Number;
+      v = &(vals[arg]);
+      at = v->Type;
+      if (at == Numeric) {
+	 arg++;
+	 SampSkip = v->Number;
+	 v = &(vals[arg]);
+	 at = v->Type;
+	 if (at == Numeric) {
+	    arg++;
+	    SampPulse = v->Number;
+	    v = &(vals[arg]);
+	    at = v->Type;
+	 }
+      }
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrSET_SKIP_START,&SampStart) < 0) {
+      IErr("LrfscDrvrSET_SKIP_START",(int *) &SampStart);
+      return arg;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plen) < 0) {
+      IErr("GET_PULSE_LENGTH",NULL);
+      return arg;
+   }
+
+   if (SampSkip == 0)
+      SampSkip = plen / (LrfscDrvrBUF_IQ_ENTRIES * LrfscDrvrTICK_TO_PAIR);
+
+
+   if (ioctl(lrfsc,LrfscDrvrSET_SKIP_COUNT,&SampSkip) < 0) {
+      IErr("LrfscDrvrSET_SKIP_COUNT",(int *) &SampSkip);
+      return arg;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrSET_PULSE,&SampPulse) < 0) {
+      IErr("SET_PULSE",(int *) &SampPulse);
+      return arg;
+   }
+
+   printf("Sample start:%d set\n", (int) SampStart);
+   printf("Sample skip :%d set\n", (int) SampSkip);
+   printf("Sample pulse:%d set\n", (int) SampPulse);
+   printf("RFPulse len :%d    \n", (int) plen);
+
+   return arg;
+}
+
+/********************************************************************************/
+
+int ConvertDacValue(short val) {
+
+int upr, lwr;
+
+   upr = ((val & 0x03FF) - 512) << 4;
+   lwr = ((val & 0x3C00) >> 10);
+   return (upr | lwr);
+}
+
+/********************************************************************************/
+
+int PlotDiag(int arg) { /* ? Signal xrange */
+
+ArgVal   *v;
+AtomType  at;
+
+LrfscDrvrDiagBuf dbuf;
+
+FILE *fpI, *fpQ, *fpp;
+char *cp;
+
+char fnamI[LN], fnamQ[LN], plot[3*LN], tmpb[LN];
+int i, simulate, xl, xh;
+unsigned int tm;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("Signals:");
+	 for (i=0; i<LrfscDrvrDiagSIGNALS; i++) {
+	    printf("%d=%s ",i,signames[i]);
+	 }
+	 printf("\n");
+	 return arg;
+      }
+   }
+
+   dbuf.Choice = LrfscDrvrDiagCAVITY;
+   if (at == Numeric) {
+      arg++;
+
+      if (v->Number >= LrfscDrvrDiagSIGNALS) {
+	 printf("No such signal:%d\n",(int) v->Number);
+	 return arg;
+      }
+      dbuf.Choice = v->Number;
+
+      v = &(vals[arg]);
+      at = v->Type;
+   }
+
+   xl = -1;
+   if (at == Numeric) {
+      arg++;
+      xl = v->Number;
+      v = &(vals[arg]);
+      at = v->Type;
+   }
+   xh = -1;
+   if (at == Numeric) {
+      arg++;
+      xh = v->Number;
+      v = &(vals[arg]);
+      at = v->Type;
+   }
+
+   dbuf.Size   = LrfscDrvrBUF_IQ_ENTRIES;
+   dbuf.Pulse  = SampPulse;
+   dbuf.Choice = v->Number;
+   dbuf.Valid  = 1;
+
+   simulate = 0;
+   if (ioctl(lrfsc,LrfscDrvrGET_DIAGNOSTICS,&dbuf) < 0) {
+      IErr("GET_DIAGNOSTICS",NULL);
+      dbuf.SkipStart = 0;
+      dbuf.SkipCount = 1;
+      dbuf.Valid     = 1;
+      simulate       = 1;
+   }
+
+   printf("Diagnostic: Size:%d Pulse:%d Choice:%s Valid:%d\n",
+	  (int) dbuf.Size,
+	  (int) dbuf.Pulse,
+		signames[dbuf.Choice],
+	  (int) dbuf.Valid);
+
+   cp = GetFile(signames[dbuf.Choice]);
+
+   if (dbuf.Valid) {
+      sprintf(fnamI,"%sI.%1d",cp, (int) dbuf.Pulse);
+      sprintf(fnamQ,"%sQ.%1d",cp, (int) dbuf.Pulse);
+      umask(0);
+      fpI = fopen(fnamI,"w");
+      fpQ = fopen(fnamQ,"w");
+      if (fpI) {
+	 for (i=0; i<dbuf.Size; i++) {
+	    tm = dbuf.SkipStart + i*dbuf.SkipCount;
+	    if (simulate) {
+	       fprintf(fpI,"%06d %06d\n",tm,i>>1);
+	       fprintf(fpQ,"%06d %06d\n",tm,i>>2);
+	    } else {
+	       fprintf(fpI,"%06d %06d\n",tm,ConvertDacValue(dbuf.Array[i].I));
+	       fprintf(fpQ,"%06d %06d\n",tm,ConvertDacValue(dbuf.Array[i].Q));
+	    }
+	 }
+	 fclose(fpI);
+	 fclose(fpQ);
+	 printf("Updated:%s\n",fnamI);
+	 printf("Updated:%s\n",fnamQ);
+
+	 bzero((void *) tmpb, LN);
+	 if (xh != -1) {
+	    sprintf(tmpb,"set xrange[%d:%d]\n",xl,xh);
+	 }
+
+	 sprintf(plot,"%splot \"%s\" with line,\"%s\" with line\npause -1\n",tmpb,fnamI,fnamQ);
+	 printf("%s",plot);
+	 cp = GetFile("Plot");
+	 if (cp) {
+	    fpp = fopen(cp,"w");
+	    if (fpp) {
+	       fprintf(fpp,"%s",plot);
+	       fclose(fpp);
+	       GnuPlot();
+	    }
+	 }
+
+      }
+   } else
+      printf("No valid diagnostics available\n");
+   return arg;
+}
+@
+
+
+1.17
+log
+@*** empty log message ***
+@
+text
+@d1446 1
+a1446 1
+   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plmx) < 0) {
+d1797 6
+a1802 5
+   if (SampSkip == 0) {
+      if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plen) < 0) {
+	 IErr("GET_PULSE_LENGTH",NULL);
+	 return arg;
+      }
+d1804 1
+a1804 1
+   }
+a1901 1
+   dbuf.Cycle  = cyc;
+d1913 1
+a1913 1
+   printf("Diagnostic: Size:%d Pulse:%d Choice:%s Cycle:%d Valid:%d\n",
+a1916 1
+	  (int) dbuf.Cycle,
+d1922 2
+a1923 2
+      sprintf(fnamI,"%sI.%02d.%1d",cp, (int) dbuf.Cycle, (int) dbuf.Pulse);
+      sprintf(fnamQ,"%sQ.%02d.%1d",cp, (int) dbuf.Cycle, (int) dbuf.Pulse);
+@
+
+
+1.16
+log
+@*** empty log message ***
+@
+text
+@d1557 3
+a1559 4
+	 fprintf(fp,"%05d %05d %05d\n",
+		 cbuf.Array[i].Ticks,
+		 cbuf.Array[i].IQ.I,
+		 cbuf.Array[i].IQ.Q);
+d1663 1
+a1663 1
+int i;
+d1698 3
+a1700 5
+	 fscanf(fp,
+		"%d %d %d\n",
+		(int *) (unsigned short *) &(cbuf.Array[i].Ticks),
+		(int *) (signed   short *) &(cbuf.Array[i].IQ.I ),
+		(int *) (signed   short *) &(cbuf.Array[i].IQ.Q ));
+@
+
+
+1.15
+log
+@*** empty log message ***
+@
+text
+@d45 1
+a45 1
+char *defaultconfigpath = CONF_DIR "/lrfsctest.config";
+d74 1
+a74 1
+	 configpath = TEMP_DIR "/lrfsctest.config";
+@
+
+
+1.14
+log
+@*** empty log message ***
+@
+text
+@a169 1
+#if 1
+a170 3
+#else
+	 sprintf(cmd,"xterm 2>/dev/null -e %s %s",cp,tmp);
+#endif
+d173 1
+@
+
+
+1.13
+log
+@*** empty log message ***
+@
+text
+@a42 12
+/* ======================================= */
+/* GNU plot launcher                       */
+
+void GnuPlot() {
+
+char cmd[LN];
+
+   sprintf(cmd,"xterm 2>/dev/null -e /usr/local/bin/gnuplot");
+   printf("Launching: %s\n",cmd);
+   Launch(cmd);
+}
+
+d155 26
+d1842 1
+a1842 1
+int PlotDiag(int arg) { /* ? Signal */
+d1849 1
+a1849 1
+FILE *fpI, *fpQ;
+d1852 2
+a1853 2
+char fnamI[LN], fnamQ[LN], plot[3*LN];
+int i, simulate;
+d1875 29
+d1950 6
+a1955 1
+	 sprintf(plot,"plot \"%s\" with line,\"%s\" with line\n",fnamI,fnamQ);
+d1957 10
+a1966 1
+	 GnuPlot();
+@
+
+
+1.12
+log
+@*** empty log message ***
+@
+text
+@d246 1
+a246 1
+   amp = 0; if (sin(phs)) amp = iq.Q/sin(phs);
+@
+
+
+1.11
+log
+@*** empty log message ***
+@
+text
+@d25 29
+a53 3
+static char *intr_names[LrfscDrvrINTERRUPTS] = {
+		"RfPulse",
+		"StartCycle" };
+d72 46
+a117 49
+	FILE *gpath = NULL;
+	char txt[128];
+	int i, j;
+
+	if (configpath) {
+		gpath = fopen(configpath,"r");
+		if (gpath == NULL) {
+			configpath = NULL;
+		}
+	}
+
+	if (configpath == NULL) {
+		configpath = "./lrfsctest.config";
+		gpath = fopen(configpath,"r");
+		if (gpath == NULL) {
+			configpath = TEMP_DIR "/lrfsctest.config";
+			gpath = fopen(configpath,"r");
+			if (gpath == NULL) {
+				configpath = defaultconfigpath;
+				gpath = fopen(configpath,"r");
+				if (gpath == NULL) {
+					configpath = NULL;
+					sprintf(path,"./%s",name);
+					return path;
+				}
+			}
+		}
+	}
+
+	bzero((void *) path,128);
+
+	while (1) {
+		if (fgets(txt,128,gpath) == NULL) break;
+		if (strncmp(name,txt,strlen(name)) == 0) {
+			for (i=strlen(name); i<strlen(txt); i++) {
+				if (txt[i] != ' ') break;
+			}
+			j= 0;
+			while ((txt[i] != ' ') && (txt[i] != 0)) {
+				path[j] = txt[i];
+				j++; i++;
+			}
+			strcat(path,name);
+			fclose(gpath);
+			return path;
+		}
+	}
+	fclose(gpath);
+	return NULL;
+d126 39
+a164 39
+	ArgVal   *v;
+	AtomType  at;
+	char     *cp;
+	int       n, earg;
+
+	/* Search for the terminator of the filename or command */
+
+	for (earg=*arg; earg<pcnt; earg++) {
+		v = &(vals[earg]);
+		if ((v->Type == Close)
+				||  (v->Type == Terminator)) break;
+	}
+
+	n = 0;
+	bzero((void *) path,128);
+
+	v = &(vals[*arg]);
+	at = v->Type;
+	if ((v->Type != Close)
+			&&  (v->Type != Terminator)) {
+
+		bzero((void *) path, 128);
+
+		cp = &(cmdbuf[v->Pos]);
+		do {
+			at = atomhash[(int) (*cp)];
+			if ((at != Seperator)
+					&&  (at != Close)
+					&&  (at != Terminator))
+				path[n++] = *cp;
+			path[n] = 0;
+			cp++;
+		} while ((at != Close) && (at != Terminator));
+	}
+	if (n) {
+		*arg = earg;
+		return path;
+	}
+	return NULL;
+d172 7
+a178 7
+	if (value != NULL)
+		printf("LrfscDrvr: [%02d] ioctl=%s arg=%d :Error\n",
+				(int) lrfsc, name, (int) *value);
+	else
+		printf("LrfscDrvr: [%02d] ioctl=%s :Error\n",
+				(int) lrfsc, name);
+	perror("LrfscDrvr");
+d186 1
+a186 1
+	char sys[128], npt[128];
+d188 1
+a188 1
+	arg++;
+d190 8
+a197 8
+	if (GetFile("lrfsc_news")) {
+		strcpy(npt,path);
+		sprintf(sys,"%s %s",GetFile(editor),npt);
+		printf("\n%s\n",sys);
+		system(sys);                  \
+		printf("\n");
+	}
+	return(arg);
+a204 1
+	int yn, c;
+d206 3
+a208 1
+	if (yesno == 0) return 1;
+d210 4
+a213 4
+	printf("%s: %s\n",question,name);
+	printf("Continue (Y/N):"); yn = getchar(); c = getchar();
+	if ((yn != (int) 'y') && (yn != 'Y')) return 0;
+	return 1;
+a220 1
+	static int eflg = 0;
+d222 1
+a222 2
+	arg++;
+	if (eflg++ > 4) eflg = 1;
+d224 2
+a225 4
+	if      (eflg == 1) editor = "e";
+	else if (eflg == 2) editor = "emacs";
+	else if (eflg == 3) editor = "nedit";
+	else if (eflg == 4) editor = "vi";
+d227 7
+a233 2
+	printf("Editor: %s\n",GetFile(editor));
+	return arg;
+d242 2
+a243 2
+	double phs, amp;
+	static char res[64];
+d245 6
+a250 6
+	phs = 0; if (iq.I) phs = atan((float) (iq.Q/iq.I));
+	amp = 0; if (sin(phs)) amp = iq.Q/sin(phs);
+	
+	bzero((void *) res, 64);
+	sprintf(res,"I:%d Q:%d Phase:%f Ampl:%f",iq.I,iq.Q,phs,amp);
+	return res;
+d258 1
+a258 1
+	char txt[128], *cp;
+d260 1
+a260 1
+	arg++;
+d262 14
+a275 14
+	cp = GetFileName(&arg);
+	if (cp) {
+		strcpy(txt,cp);
+		if (YesNo("Change lrfsctest config to:",txt)) {
+			configpath = localconfigpath;
+			strcpy(configpath,txt);
+		}
+	} else configpath = NULL;
+
+	sprintf(txt,"%s %s",GetFile(editor),configpath);
+	printf("\n%s\n",txt);
+	system(txt);
+	printf("\n");
+	return(arg);
+a281 39
+	ArgVal   *v;
+	AtomType  at;
+	int mod, cnt;
+	LrfscDrvrModuleAddress mad;
+
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+	if (at == Numeric) {
+		arg++;
+		if (v->Number) {
+			mod = v->Number;
+			if (ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod) < 0) {
+				IErr("SET_MODULE",&mod);
+				return arg;
+			}
+		}
+		module = mod;
+	}
+
+	cnt = 0;
+	if (ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt) < 0) {
+		IErr("GET_MODULE_COUNT",NULL);
+		return arg;
+	}
+
+	for (mod=1; mod<=cnt; mod++) {
+		ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod);
+		ioctl(lrfsc,LrfscDrvrGET_MODULE_ADDRESS,&mad);
+		printf("Module:%d Adr:0x%08X Ram:0x%08X Vec:0x%02X Lvl:0x%1X",
+				(int) mod,
+				(int) mad.VMEAddress,
+				(int) mad.RamAddress,
+				(int) mad.InterruptVector,
+				(int) mad.InterruptLevel);
+		if (mod == module) printf(" <<==");
+		printf("\n");
+	}
+	ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+d283 42
+a324 1
+	return arg;
+a329 1
+	int cnt;
+d331 1
+a331 1
+	arg++;
+d333 10
+a342 8
+	ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+	if (module >= cnt) {
+		module = 1;
+		ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+	} else {
+		module ++;
+		ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+	}
+d344 1
+a344 1
+	return arg;
+a349 1
+	int cnt;
+d351 3
+a353 1
+	arg++;
+d355 8
+a362 8
+	ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+	if (module > 1) {
+		module --;
+		ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+	} else {
+		module = cnt;
+		ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+	}
+d364 1
+a364 1
+	return arg;
+a369 23
+	ArgVal   *v;
+	AtomType  at;
+	int debug;
+
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+	if (at == Numeric) {
+		arg++;
+		if (v->Number) debug = v->Number;
+		else           debug = 0;
+		if (ioctl(lrfsc,LrfscDrvrSET_SW_DEBUG,&debug) < 0) {
+			IErr("SET_SW_DEBUG",&debug);
+			return arg;
+		}
+	}
+	debug = -1;
+	if (ioctl(lrfsc,LrfscDrvrGET_SW_DEBUG,&debug) < 0) {
+		IErr("GET_SW_DEBUG",NULL);
+		return arg;
+	}
+	if (debug > 0) printf("Debug Level: [0x%X] On\n",debug);
+	else           printf("Debug: Disabled\n");
+d371 26
+a396 1
+	return arg;
+a401 24
+	ArgVal   *v;
+	AtomType  at;
+	int timeout;
+
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+	if (at == Numeric) {
+		arg++;
+		timeout = v->Number;
+		if (ioctl(lrfsc,LrfscDrvrSET_TIMEOUT,&timeout) < 0) {
+			IErr("SET_TIMEOUT",&timeout);
+			return arg;
+		}
+	}
+	timeout = -1;
+	if (ioctl(lrfsc,LrfscDrvrGET_TIMEOUT,&timeout) < 0) {
+		IErr("GET_TIMEOUT",NULL);
+		return arg;
+	}
+	if (timeout > 0)
+		printf("Timeout: [%d] Enabled\n",timeout);
+	else
+		printf("Timeout: [%d] Disabled\n",timeout);
+d403 24
+a426 1
+	return arg;
+d433 21
+a453 21
+		"IrqSrc","State","Control","VmeIrq","RamSelect",
+		"Diag1Select","Diag2Select","Diag3Select","Diag4Select",
+		"ResCtrlTime","ResCtrl",
+		"ResFwdI","ResFwdQ","ResCavI","ResCavQ",
+		"SwitchCtrl","SoftSwitch",
+		"RefMatrixA","RefMatrixB","RefMatrixC","RefMatrixD",
+		"FwdMatrixA","FwdMatrixB","FwdMatrixC","FwdMatrixD",
+		"CavMatrixA","CavMatrixB","CavMatrixC","CavMatrixD",
+		"DiagTime",
+		"RefDiagI","RefDiagQ",
+		"FwdDiagI","FwdDiagQ",
+		"CavDiagI","CavDiagQ",
+		"ErrDiagI","ErrDiagQ",
+		"OutDiagI","OutDiagQ",
+		"POutDiagI","POutDiagQ",
+		"IOutDiagI","IOutDiagQ",
+		"KP","KI",
+		"RfOffTime",
+		"PulseNumber","NextCycle","PresentCycle",
+		"VhdlVerH","VhdlVerL",
+		"Status","RfOnMaxLength" };
+d478 2
+a479 2
+	 if (addr & 1) fp = "I:";
+	 else          fp = "Q:";
+a530 2
+	ArgVal   *v;
+	AtomType  at;
+d532 2
+a533 1
+	printf("RawIo on module address map\n");
+d535 11
+a545 9
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Numeric) {
+		arg++;
+		EditMemory(v->Number/2,0);
+	} else
+		EditMemory(0,0);
+d547 1
+a547 1
+	return arg;
+a552 2
+	ArgVal   *v;
+	AtomType  at;
+d554 2
+a555 1
+	printf("RawIo on module address map\n");
+d557 1
+a557 9
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Numeric) {
+		arg++;
+		EditMemory(v->Number,1);
+	} else
+		EditMemory(0,1);
+d559 11
+a569 1
+	return arg;
+a574 30
+	ArgVal   *v;
+	AtomType  at;
+	long qflag, qsize, qover;
+
+	arg++;
+
+	v = &(vals[arg]);
+	at = v->Type;
+	if (at == Numeric) {
+		arg++;
+		qflag = v->Number;
+
+		if (ioctl(lrfsc,LrfscDrvrSET_QUEUE_FLAG,&qflag) < 0) {
+			IErr("SET_QUEUE_FLAG",(int *) &qflag);
+			return arg;
+		}
+	}
+	qflag = -1;
+	if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+		IErr("GET_QUEUE_FLAG",NULL);
+		return arg;
+	}
+	if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+		IErr("GET_QUEUE_SIZE",NULL);
+		return arg;
+	}
+	if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_OVERFLOW,&qover) < 0) {
+		IErr("GET_QUEUE_OVERFLOW",NULL);
+		return arg;
+	}
+d576 35
+a610 4
+	if (qflag == -1) {
+	    IErr("GET_QUEUE_FLAG",NULL);
+	    return arg;
+	}
+d612 6
+a617 6
+	if (qflag == 1) printf("NoQueueFlag: Set,   Queuing is Off\n");
+	else { printf("NoQueueFlag: ReSet, Queuing is On\n");
+	       printf("QueueSize: %d\n",    (int) qsize);
+	       printf("QueueOverflow: %d\n",(int) qover);
+	}
+	return arg;
+d624 45
+a668 45
+	LrfscDrvrClientConnections cons;
+	LrfscDrvrConnection *con;
+	LrfscDrvrClientList clist;
+	int i, j, k, pid, mypid;
+
+	arg++;
+
+	mypid = getpid();
+
+	if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_LIST,&clist) < 0) {
+		IErr("GET_CLIENT_LIST",NULL);
+		return arg;
+	}
+
+	for (i=0; i<clist.Size; i++) {
+		pid = clist.Pid[i];
+
+		bzero((void *) &cons, sizeof(LrfscDrvrClientConnections));
+		cons.Pid = pid;
+
+		if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_CONNECTIONS,&cons) < 0) {
+			IErr("GET_CLIENT_CONNECTIONS",NULL);
+			return arg;
+		}
+
+		if (pid == mypid) printf("Pid: %d (lrfsctest) ",pid);
+		else              printf("Pid: %d ",pid);
+
+		if (cons.Size) {
+			for (j=0; j<cons.Size; j++) {
+				con = &(cons.Connections[j]);
+				printf("[Mod:%d Interrupt:0x%X]:",(int) con->Module,(int) con->Interrupt);
+				for (k=0; k<LrfscDrvrINTERRUPTS; k++) {
+					if ((1<<k) & con->Interrupt) {
+						if (intr_names[k] != NULL)
+							printf(" %s",intr_names[k]);
+						else
+							printf(" Bit%02d",k);
+					}
+				}
+			}
+		} else printf("No connections");
+		printf("\n");
+	}
+	return arg;
+d675 1
+a675 1
+	int module;
+d677 1
+a677 1
+	arg++;
+d679 4
+a682 4
+	if (ioctl(lrfsc,LrfscDrvrRESET,NULL) < 0) {
+		IErr("RESET",NULL);
+		return arg;
+	}
+d684 5
+a688 5
+	module = -1;
+	if (ioctl(lrfsc,LrfscDrvrGET_MODULE,&module) < 0) {
+		IErr("GET_MODULE",NULL);
+		return arg;
+	}
+d690 1
+a690 1
+	printf("Reset Module: %d\n",module);
+d692 1
+a692 1
+	return arg;
+d700 6
+a705 6
+		"OVER_REF",
+		"OVER_FWD",
+		"OVER_CAV",
+		"RF_TOO_LONG",
+		"NO_FAST_PROTECT",
+		"MISSING_TICK" };
+d709 2
+a710 2
+	static char res[STAT_STR_SIZE];
+	int i, msk;
+d712 1
+a712 1
+	bzero((void *) res,STAT_STR_SIZE);
+d714 8
+a721 8
+	for (i=0; i<LrfscDrvrSTATAE; i++) {
+		msk = 1 << i;
+		if (stat & msk) {
+			strcat(res,statnames[i]);
+			strcat(res,":");
+		}
+	}
+	return res;
+d728 1
+a728 1
+	static char tbuf[128];
+d730 2
+a731 2
+	char tmp[128];
+	char *yr, *ti, *md, *mn, *dy;
+d733 2
+a734 2
+	bzero((void *) tbuf, 128);
+	bzero((void *) tmp, 128);
+d736 15
+a750 15
+	if (tod) {
+		ctime_r (&tod, tmp);
+
+		tmp[3] = 0;
+		dy = &(tmp[0]);
+		tmp[7] = 0;
+		mn = &(tmp[4]);
+		tmp[10] = 0;
+		md = &(tmp[8]);
+		if (md[0] == ' ')
+			md[0] = '0';
+		tmp[19] = 0;
+		ti = &(tmp[11]);
+		tmp[24] = 0;
+		yr = &(tmp[20]);
+d752 1
+a752 1
+		sprintf (tbuf, "%s-%s/%s/%s %s"  , dy, md, mn, yr, ti);
+d754 1
+a754 1
+	} else sprintf(tbuf, "--- Zero ---");
+d756 1
+a756 1
+	return (tbuf);
+d763 2
+a764 2
+	LrfscDrvrVersion version;
+	time_t tod;
+d766 1
+a766 1
+	arg++;
+d768 5
+a772 5
+	bzero((void *) &version, sizeof(LrfscDrvrVersion));
+	if (ioctl(lrfsc,LrfscDrvrGET_VERSION,&version) < 0) {
+		IErr("GET_VERSION",NULL);
+		return arg;
+	}
+d774 2
+a775 2
+	tod = version.Driver;
+	printf("Drvr: [%u] %s\n",(int) tod,TimeToStr(tod));
+d777 2
+a778 2
+	tod = version.Firmware;
+	printf("VHDL: [%u] %s\n",(int) tod,TimeToStr(tod));
+d780 2
+a781 2
+	tod = COMPILE_TIME;
+	printf("Test: [%u] %s\n",(int) tod,TimeToStr(tod));
+d783 1
+a783 1
+	return arg;
+d830 5
+a834 4
+      if (v->Number) {
+	 interrupt  = v->Number;
+	 con.Module = module;
+	 con.Interrupt   = interrupt;
+d838 5
+d844 2
+a845 4
+	 con.Pulses = 0XFF;
+	 if (v->Number) {
+	    arg++;
+	    con.Pulses = v->Number;
+d905 1
+a905 1
+	  (int) con.Pulses);
+d919 1
+a919 1
+	LrfscDrvrStatus stat;
+d921 1
+a921 1
+	arg++;
+d923 7
+a929 7
+	stat = 0;
+	if (ioctl(lrfsc,LrfscDrvrGET_STATUS,&stat) <0) {
+		IErr("GET_STATUS",NULL);
+		return arg;
+	}
+	printf("Status:[0x%2X]%s\n",(int) stat, StatusToStr((unsigned long) stat));
+	return arg;
+a936 2
+	ArgVal   *v;
+	AtomType  at;
+d938 9
+a946 2
+	LrfscDrvrState stat;
+	int i;
+d948 35
+a982 39
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Operator) {
+		if (v->OId == OprNOOP) {
+			arg++;
+			v = &(vals[arg]);
+			at = v->Type;
+
+			printf("State Values:");
+			for (i=0; i<LrfscDrvrSTATES; i++) {
+				printf("%d=%s ",i,statenames[i]);
+			}
+			printf("\n");
+			return arg;
+		}
+	}
+
+	if (at == Numeric) {
+		arg++;
+
+		if ((v->Number >= 0) && (v->Number < LrfscDrvrSTATES)) {
+			stat = v->Number;
+			if (ioctl(lrfsc,LrfscDrvrSET_STATE,&stat) < 0) {
+				IErr("SET_STATE",NULL);
+				return arg;
+			}
+		} else printf("Illegal state value\n");
+	}
+
+	stat = 0;
+	if (ioctl(lrfsc,LrfscDrvrGET_STATE,&stat) < 0) {
+		IErr("GET_STATE", NULL);
+		return arg;
+	}
+	
+	printf("State:%d=%s\n",(int) stat, statenames[(int) stat]);
+	return arg;
+d991 57
+a1047 2
+	ArgVal   *v;
+	AtomType  at;
+d1049 10
+a1058 65
+	LrfscDrvrDiagChoices dchoice;
+	LrfscDrvrDiagSignalChoice schoice;
+	int i, diag, sval;
+
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Operator) {
+		if (v->OId == OprNOOP) {
+			arg++;
+			v = &(vals[arg]);
+			at = v->Type;
+
+			printf("Signals:");
+			for (i=0; i<LrfscDrvrDiagSIGNALS; i++) {
+				printf("%d=%s ",i,signames[i]);
+			}
+			printf("\n");
+			return arg;
+		}
+	}
+	
+	diag = -1;
+	if (at == Numeric) {
+		arg++;
+		if ((v->Number >=0) && (v->Number < LrfscDrvrDiagSIGNAL_CHOICES)) {
+			diag = v->Number;
+			v = &(vals[arg]);
+			at = v->Type;
+		} else {
+			printf("Illegal Diagnostic Index:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrDiagSIGNAL_CHOICES);
+			return arg;
+		}
+	}
+	
+	sval = -1;
+	schoice = LrfscDrvrDiagREFLECTED;
+	if (at == Numeric) {
+		arg++;
+		if ((v->Number >= 0) && (v->Number < LrfscDrvrDiagSIGNALS)) {
+			schoice = (LrfscDrvrDiagSignalChoice) v->Number;
+			sval = (int) schoice;
+		} else {
+			printf("Illegal Signal choice:%d Not in range[0..%d]\n",(int) v->Number, LrfscDrvrDiagSIGNALS);
+			return arg;
+		}
+	}
+	
+	bzero((void *) &dchoice, sizeof(LrfscDrvrDiagChoices));
+	if (ioctl(lrfsc,LrfscDrvrGET_DIAG_CHOICE,&dchoice) < 0) {
+		IErr("GET_DIAG_CHOICE", NULL);
+		return arg;
+	}
+	
+	if (sval != -1) {
+		dchoice[diag] = schoice;
+		if (ioctl(lrfsc,LrfscDrvrSET_DIAG_CHOICE,&dchoice) < 0) {
+			IErr("SET_DIAG_CHOICE",(int *) &diag);
+			return arg;
+		}
+	}
+	
+	for (i=0; i<LrfscDrvrDiagSIGNAL_CHOICES; i++)
+		printf("Diag:%d %d=%s\n",i,dchoice[i],signames[dchoice[i]]);
+d1060 1
+a1060 1
+	return arg;	
+d1067 47
+a1113 47
+	ArgVal   *v;
+	AtomType  at;
+	LrfscDrvrResCtrl resc;
+
+	arg++;
+
+	if (at == Numeric) {
+		arg++;
+		if (v->Number < 0xFFFF) {
+			
+			if (ioctl(lrfsc,LrfscDrvrGET_RES_CTRL, &resc) < 0) {
+				IErr("GET_RES_CTRL", NULL);
+				return arg;
+			}
+			resc.Time = v->Number;
+			
+			v = &(vals[arg]);
+			at = v->Type;
+			if (at == Numeric) {
+				arg++;
+				if (v->Number < 0xFFFF) {
+					resc.Value = v->Number;
+				} else {
+					printf("Illegal Control Value:%d Not in range[0..0xFFFF]\n",(int) v->Number);
+					return arg;
+				}
+			}
+			
+			if (ioctl(lrfsc,LrfscDrvrSET_RES_CTRL, &resc) < 0) {
+				IErr("SET_RES_CTRL", NULL);
+				return arg;
+			}
+			
+		} else {
+			printf("Illegal Control Time:%d Not in range[0..0xFFFF]\n",(int) v->Number);
+			return arg;
+		}
+	}
+	
+	if (ioctl(lrfsc,LrfscDrvrGET_RES_CTRL, &resc) < 0) {
+		IErr("GET_RES_CTRL", NULL);
+		return arg;
+	}
+	
+	printf("ResCtrlTime:%d ResCtrlValue:%d\n",(int) resc.Time, (int) resc.Value);
+	printf("ResFwd:%s ResCav:%s\n",IQToStr(resc.Fwd),IQToStr(resc.Cav));
+	return arg;
+d1122 5
+a1126 2
+	ArgVal   *v;
+	AtomType  at;
+d1128 44
+a1171 47
+	LrfscDrvrAnalogSwitch anls;
+	int i, msk;
+	
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Operator) {
+		if (v->OId == OprNOOP) {
+			arg++;
+			v = &(vals[arg]);
+			at = v->Type;
+
+			printf("BITS:AnalogueSwitch:");
+			for (i=0; i<LrfscDrvrAnalogSWITCHES; i++) {
+				msk = 1<<i;
+				printf("0x%02X=%s ",msk,anlsnames[i]);
+			}
+			printf("\n");
+			return arg;
+		}
+	}
+	
+	if (at == Numeric) {
+		arg++;
+		if (v->Number <= 0x0F) {
+			anls = v->Number;
+			if (ioctl(lrfsc,LrfscDrvrSET_ANALOGUE_SWITCH,&anls) < 0) {
+				IErr("SET_ANALOGUE_SWITCH",(int *) &anls);
+				return arg;
+			}
+		}
+	}
+	
+	anls = 0;
+	if (ioctl(lrfsc,LrfscDrvrGET_ANALOGUE_SWITCH,&anls) < 0) {
+		IErr("GET_ANALOGUE_SWITCH",NULL);
+		return arg;
+	}
+	printf("BITS:AnalogueSwitch:0x%02X\n",(int) anls);
+	for (i=0; i<LrfscDrvrAnalogSWITCHES; i++) {
+		msk = 1<<i;
+		printf("0x%02X=%s =>",msk,anlsnames[i]);
+		if (msk & anls) printf("Test\n");
+		else            printf("Normal\n");
+	}
+	return arg;
+d1179 29
+a1207 29
+	ArgVal   *v;
+	AtomType  at;
+	
+	LrfscDrvrSoftSwitch sfts;
+	
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+
+	if (at == Numeric) {
+		arg++;
+		if (v->Number < LrfscDrvrSoftSWITCHES) {
+			sfts = v->Number;
+			if (ioctl(lrfsc,LrfscDrvrSET_SOFT_SWITCH,&sfts) < 0) {
+				IErr("SET_SOFT_SWITCH",(int *) &sfts);
+				return arg;
+			}
+		}
+	}
+	
+	sfts = 0;
+	if (ioctl(lrfsc,LrfscDrvrGET_SOFT_SWITCH,&sfts) < 0) {
+		IErr("GET_SOFT_SWITCH", NULL);
+		return arg;
+	}
+
+	printf("SoftSwitch:");
+	if (sfts == LrfscDrvrSotfSwitchMAIN_CLOSED) printf("Closed\n");
+	else                                        printf("Open\n");
+d1209 1
+a1209 1
+	return arg;
+d1311 1
+a1311 1
+      printf("Matrix:%d:%s A:%d B:%d C:%d D:%d\n",
+d1516 1
+a1516 2
+	 cbuf.Start = 0;
+	 cbuf.Items = LrfscDrvrBUF_IQ_ENTRIES;
+a1522 8
+	 if (cbuf.Valid == 0) {
+	    printf("WARNING:No valid data available for cycle:%d\n", (int) cyc);
+	    if (YesNo("Continue","") == 0) {
+	       printf("Aborted\n");
+	       return arg;
+	    }
+	 }
+
+d1545 5
+a1549 2
+      for (i=0; i<LrfscDrvrBUF_IQ_ENTRIES; i++) {
+	 fprintf(fp,"%05d %05d\n",cbuf.Array[i].I,cbuf.Array[i].Q);
+d1664 1
+a1664 2
+	 cbuf.Start = 0;
+	 cbuf.Items = LrfscDrvrBUF_IQ_ENTRIES;
+d1687 6
+a1692 4
+      for (i=0; i<LrfscDrvrBUF_IQ_ENTRIES; i++) {
+	 fscanf(fp,"%d %d\n",
+		(int *) (signed short *) &(cbuf.Array[i].I),
+		(int *) (signed short *) &(cbuf.Array[i].Q));
+d1733 1
+d1744 1
+d1751 2
+a1752 2
+static unsigned long SampSkip   = 0x40;
+static unsigned long SampPulses = 0x04;
+d1754 1
+a1754 1
+int SetSampling(int arg) { /* Start, Skip, PulseMask */
+d1759 2
+a1769 6
+      if (ioctl(lrfsc,LrfscDrvrSET_SKIP_START,&SampStart) < 0) {
+	 IErr("LrfscDrvrSET_SKIP_START",(int *) &SampStart);
+	 return arg;
+      }
+      printf("Sample start:%d set\n", (int) SampStart);
+
+a1774 6
+	 if (ioctl(lrfsc,LrfscDrvrSET_SKIP_COUNT,&SampSkip) < 0) {
+	    IErr("LrfscDrvrSET_SKIP_COUNT",(int *) &SampSkip);
+	    return arg;
+	 }
+	 printf("Sample skip :%d set\n", (int) SampSkip);
+
+d1777 1
+a1777 1
+	    SampPulses = v->Number;
+d1780 3
+a1782 4
+	    if (ioctl(lrfsc,LrfscDrvrSET_PULSE_MASK,&SampPulses) < 0) {
+	       IErr("SET_PULSE_MASK",(int *) &SampPulses);
+	       return arg;
+	    }
+d1784 4
+a1787 1
+	    printf("Sample pulse:%d set\n", (int) SampPulses);
+d1789 4
+a1792 1
+	 }
+d1794 6
+d1801 11
+d1817 11
+d1835 1
+a1835 1
+FILE *fp;
+d1838 3
+a1840 3
+char fnam[LN];
+int i, j;
+unsigned int pmsk, tm;
+d1861 2
+a1862 2
+   dbuf.Size = LrfscDrvrBUF_IQ_ENTRIES;
+   dbuf.Pulses = SampPulses;
+d1864 2
+a1865 1
+   dbuf.Cycle = cyc;
+d1867 1
+d1870 4
+a1873 1
+      return arg;
+d1876 7
+d1884 16
+a1899 10
+   for (i=0; i<LrfscDrvrPULSES; i++) {
+      pmsk = 1 << i;
+      if (dbuf.Valid & pmsk) {
+	 sprintf(fnam,"cp.%02d.%1d",(int) dbuf.Cycle, i);
+	 umask(0);
+	 fp = fopen(fnam,"w");
+	 if (fp) {
+	    for (j=0; j<dbuf.Size; j++) {
+	       tm = dbuf.SkipStart + j*dbuf.SkipCount;
+	       fprintf(fp,"%06d %06d %06d\n",tm,dbuf.Array[i][j].I,dbuf.Array[i][j].Q);
+a1900 2
+	    fclose(fp);
+	    printf("Updated:%s\n",fnam);
+d1902 8
+d1911 2
+a1912 1
+   }
+@
+
+
+1.10
+log
+@*** empty log message ***
+@
+text
+@d16 1
+a16 1
+#define CONF_DIR "/usr/local/drivers/lrfsc"
+d427 24
+a450 12
+	LrfscDrvrRawIoBlock iob;
+	unsigned short array[2];
+	unsigned short addr, *data;
+	char c, *cp, str[128], *fp;
+	int n, radix, nadr;
+
+	printf("EditMemory: [/]: Open, [CR]: Next, [.]: Exit [x]: Hex, [d]: Dec\n\n");
+
+	data = array;
+	addr = address;
+	radix = 16;
+	c = '\n';
+d452 5
+a456 11
+	while (1) {
+		iob.Size = 1;
+		iob.Offset = address;
+		iob.RamFlag = ramflg;
+		iob.UserArray = array;
+		if (ioctl(lrfsc,LrfscDrvrRAW_READ,&iob) < 0) IErr("RAW_READ",(int *) &addr);
+
+		if (ramflg) {
+			if (addr & 1) fp = "I:";
+			else          fp = "Q:";
+		} else           fp = modflds[addr];
+d458 1
+a458 5
+		if (radix == 16) {
+			if (c=='\n') printf("%16s:Addr:0x%04x: 0x%04x ", fp, (int) addr,(int) *data);
+		} else {
+			if (c=='\n') printf("%16s:Addr:%04d: %5d ", fp, (int) addr,(int) *data);
+		}
+d460 12
+a471 1
+		c = (char) getchar();
+d473 12
+a484 6
+		if (c == '/') {
+			bzero((void *) str, 128); n = 0;
+			while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+			nadr = strtoul(str,&cp,radix);
+			if (cp != str) addr = nadr;
+		}
+d486 10
+a495 23
+		else if (c == 'x')  {radix = 16; addr--; continue; }
+		else if (c == 'd')  {radix = 10; addr--; continue; }
+		else if (c == '.')  { c = getchar(); printf("\n"); break; }
+		else if (c == '\n') {
+			addr ++;
+			if (ramflg == 0) {
+				if (addr >= MOD_FIELDS) {
+					printf("\n");
+					addr = 0;
+				}
+			}
+		}
+
+		else {
+			bzero((void *) str, 128); n = 0;
+			str[n++] = c;
+			while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+			*data = strtoul(str,&cp,radix);
+			if (cp != str) {
+				if (ioctl(lrfsc,LrfscDrvrRAW_WRITE,&iob) < 0) IErr("RAW_WRITE",(int *) &addr);
+			}
+		}
+	}
+d512 1
+a512 1
+		EditMemory(v->Number,0);
+d757 3
+a759 3
+int WaitInterrupt(int arg) { /* msk */
+	ArgVal   *v;
+	AtomType  at;
+d761 2
+a762 2
+	LrfscDrvrConnection con;
+	int i, cc, qflag, qsize, nowait, interrupt, cnt;
+d764 3
+a766 3
+	arg++;
+	v = &(vals[arg]);
+	at = v->Type;
+d768 6
+a773 6
+	nowait = 0;
+	if (at == Operator) {
+		if (v->OId == OprNOOP) {
+			arg++;
+			v = &(vals[arg]);
+			at = v->Type;
+d775 13
+a787 13
+			printf("WaitInterrupt: [-] Optional No Wait, Connect only\n");
+			printf("WaitInterrupt: Sources are:\n");
+			for (i=0; i<LrfscDrvrINTERRUPTS; i++) {
+				if (intr_names[i] != NULL) {
+					printf("0x%04X %s\n",(1<<i),intr_names[i]);
+				}
+			}
+			return arg;
+		}
+		if (v->OId == OprMI) {    /* A - means don't wait, just connect */
+			arg++;
+			v = &(vals[arg]);
+			at = v->Type;
+d789 3
+a791 3
+			nowait = 1;
+		}
+	}
+d793 3
+a795 3
+	interrupt = 0;
+	if (at == Numeric) {
+		arg++;
+d797 4
+a800 8
+		if (v->Number) {
+			interrupt  = v->Number;
+			con.Module = module;
+			con.Interrupt   = interrupt;
+			if (ioctl(lrfsc,LrfscDrvrCONNECT,&con) < 0) {
+				IErr("CONNECT",&interrupt);
+				return arg;
+			}
+d802 2
+a803 2
+			v = &(vals[arg]);
+			at = v->Type;
+d805 9
+a813 4
+			if (v->Number) {
+				arg++;
+				con.Pulses = v->Number;
+			}
+d815 13
+a827 13
+			connected = 1;
+		} else {
+			con.Module     = module;
+			con.Interrupt  = 0;
+			if (ioctl(lrfsc,LrfscDrvrDISCONNECT,&con) < 0) {
+				IErr("DISCONNECT",&interrupt);
+				return arg;
+			}
+			connected = 0;
+			printf("Disconnected from all interrupts\n");
+			return arg;
+		}
+	}
+d829 4
+a832 4
+	if (connected == 0) {
+		printf("WaitInterrupt: Error: No connections to wait for\n");
+		return arg;
+	}
+d834 4
+a837 4
+	if (nowait) {
+		printf("WaitInterrupt: Connect: No Wait: OK\n");
+		return arg;
+	}
+d839 15
+a853 15
+	cnt = 0;
+	do {
+		cc = read(lrfsc,&con,sizeof(LrfscDrvrConnection));
+		if (cc <= 0) {
+			printf("Time out or Interrupted call\n");
+			return arg;
+		}
+		if (interrupt != 0) {
+			if (con.Interrupt & interrupt) break;
+		} else break;
+		if (cnt++ > 64) {
+			printf("Aborted wait loop after 64 iterations\n");
+			return arg;
+		}
+	} while (True);
+d855 4
+a858 4
+	if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+		IErr("GET_QUEUE_FLAG",NULL);
+		return arg;
+	}
+d860 4
+a863 4
+	if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+		IErr("GET_QUEUE_SIZE",NULL);
+		return arg;
+	}
+d865 4
+a868 4
+	printf("Mod[%d] Int[0x%X] Pls[0x%X]\n",
+			(int) con.Module,
+			(int) con.Interrupt,
+			(int) con.Pulses);
+d870 4
+a873 4
+	if (qflag == 0) {
+		if (qsize) printf(" Queued: %d",(int) qsize);
+	}
+	printf("\n");
+d875 1
+a875 1
+	return arg;
+d1424 1
+a1424 1
+      if ((ncy >= 0) && (ncy < LrfscDrvrCYCLES)) {
+d1454 2
+a1455 2
+#define SET_POINTS "SetPoints"
+#define FEED_FORWARD "FeedFwd"
+d1555 1
+a1555 1
+char cmbuf[LN];
+d1571 2
+d1583 1
+a1583 1
+   sprintf(cmbuf,"%s %s.%02d",GetFile(editor), cp, (int) cyc);
+d1712 120
+@
+
+
+1.9
+log
+@*** empty log message ***
+@
+text
+@d1402 2
+d1418 1
+a1418 1
+	 ncy = v->Number;
+a1454 2
+unsigned long cy;
+
+a1464 1
+   cy = 0;
+d1467 2
+a1468 2
+      if ((cy >= 0) && (cy < LrfscDrvrCYCLES)) {
+	 cy = v->Number;
+d1470 1
+a1470 1
+	 cbuf.Cycle = cy;
+d1475 1
+a1475 1
+	    IErr("GET_CYCLE_CONFIG",(int *) &cy);
+d1480 1
+a1480 1
+	    printf("WARNING:No valid data available for cycle:%d\n", (int) cy);
+d1503 1
+a1503 1
+   sprintf(fnam,"%s.%02d", cp, (int) cy);
+a1546 2
+unsigned long cy;
+
+a1553 1
+   cy = 0;
+d1556 2
+a1557 2
+      if ((cy >= 0) && (cy < LrfscDrvrCYCLES)) {
+	 cy = v->Number;
+d1574 1
+a1574 1
+   sprintf(cmbuf,"%s %s.%02d",GetFile(editor), cp, (int) cy);
+a1607 2
+unsigned long cy;
+
+a1617 1
+   cy = 0;
+d1620 3
+a1622 3
+      if ((cy >= 0) && (cy < LrfscDrvrCYCLES)) {
+	 cy = v->Number;
+	 cbuf.Cycle = cy;
+d1641 1
+a1641 1
+   sprintf(fnam,"%s.%02d", cp, (int) cy);
+d1657 1
+a1657 1
+	 IErr("SET_CYCLE_CONFIG",(int *) &cy);
+d1683 20
+@
+
+
+1.8
+log
+@*** empty log message ***
+@
+text
+@d1603 87
+@
+
+
+1.7
+log
+@*** empty log message ***
+@
+text
+@d14 1
+d220 2
+a221 2
+	phs = 0; if (iq.Q) phs = atan((float) (iq.I/iq.Q));
+	amp = 0; if (sin(phs)) amp = iq.I/sin(phs);
+d1440 163
+@
+
+
+1.6
+log
+@*** empty log message ***
+@
+text
+@d1364 1
+a1364 1
+int GetSetPulseLength(int arg) {
+d1398 41
+@
+
+
+1.5
+log
+@*** empty log message ***
+@
+text
+@d1278 1
+a1278 1
+int GetSetSnapShot(int arg) {
+d1317 81
+@
+
+
+1.4
+log
+@*** empty log message ***
+@
+text
+@d1170 1
+a1170 1
+int GetSetCoefficients(int arg) { /* Matrix, A, B, C, D */
+d1275 42
+@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@d223 1
+a223 1
+	sprintf(res,"I:%d Q:%d Phase:%f Ampl%f",iq.I,iq.Q,phs,amp);
+d276 1
+d567 9
+a575 4
+	if (qflag==1) printf("NoQueueFlag: Set,   Queuing is Off\n");
+	else        { printf("NoQueueFlag: ReSet, Queuing is On\n");
+	printf("QueueSize: %d\n",    (int) qsize);
+	printf("QueueOverflow: %d\n",(int) qover);
+d877 2
+d912 1
+a912 1
+			printf("/n");
+d929 1
+d966 1
+a966 1
+			printf("/n");
+d997 1
+d1025 2
+d1097 1
+a1097 1
+			printf("/n");
+d1113 1
+d1153 1
+a1153 1
+
+d1165 110
+@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@d1117 1
+a1117 1
+int GetSetSoftSwitcj(int arg) {
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d25 2
+a26 2
+   "RfPulse",
+   "StartCycle" };
+d45 49
+a93 49
+FILE *gpath = NULL;
+char txt[128];
+int i, j;
+
+   if (configpath) {
+      gpath = fopen(configpath,"r");
+      if (gpath == NULL) {
+	 configpath = NULL;
+      }
+   }
+
+   if (configpath == NULL) {
+      configpath = "./lrfsctest.config";
+      gpath = fopen(configpath,"r");
+      if (gpath == NULL) {
+	 configpath = TEMP_DIR "/lrfsctest.config";
+	 gpath = fopen(configpath,"r");
+	 if (gpath == NULL) {
+	    configpath = defaultconfigpath;
+	    gpath = fopen(configpath,"r");
+	    if (gpath == NULL) {
+	       configpath = NULL;
+	       sprintf(path,"./%s",name);
+	       return path;
+	    }
+	 }
+      }
+   }
+
+   bzero((void *) path,128);
+
+   while (1) {
+      if (fgets(txt,128,gpath) == NULL) break;
+      if (strncmp(name,txt,strlen(name)) == 0) {
+	 for (i=strlen(name); i<strlen(txt); i++) {
+	    if (txt[i] != ' ') break;
+	 }
+	 j= 0;
+	 while ((txt[i] != ' ') && (txt[i] != 0)) {
+	    path[j] = txt[i];
+	    j++; i++;
+	 }
+	 strcat(path,name);
+	 fclose(gpath);
+	 return path;
+      }
+   }
+   fclose(gpath);
+   return NULL;
+d102 39
+a140 39
+ArgVal   *v;
+AtomType  at;
+char     *cp;
+int       n, earg;
+
+   /* Search for the terminator of the filename or command */
+
+   for (earg=*arg; earg<pcnt; earg++) {
+      v = &(vals[earg]);
+      if ((v->Type == Close)
+      ||  (v->Type == Terminator)) break;
+   }
+
+   n = 0;
+   bzero((void *) path,128);
+
+   v = &(vals[*arg]);
+   at = v->Type;
+   if ((v->Type != Close)
+   &&  (v->Type != Terminator)) {
+
+      bzero((void *) path, 128);
+
+      cp = &(cmdbuf[v->Pos]);
+      do {
+	 at = atomhash[(int) (*cp)];
+	 if ((at != Seperator)
+	 &&  (at != Close)
+	 &&  (at != Terminator))
+	    path[n++] = *cp;
+	 path[n] = 0;
+	 cp++;
+      } while ((at != Close) && (at != Terminator));
+   }
+   if (n) {
+      *arg = earg;
+      return path;
+   }
+   return NULL;
+d148 7
+a154 7
+   if (value != NULL)
+      printf("LrfscDrvr: [%02d] ioctl=%s arg=%d :Error\n",
+	     (int) lrfsc, name, (int) *value);
+   else
+      printf("LrfscDrvr: [%02d] ioctl=%s :Error\n",
+	     (int) lrfsc, name);
+   perror("LrfscDrvr");
+d162 1
+a162 1
+char sys[128], npt[128];
+d164 1
+a164 1
+   arg++;
+d166 8
+a173 8
+   if (GetFile("lrfsc_news")) {
+      strcpy(npt,path);
+      sprintf(sys,"%s %s",GetFile(editor),npt);
+      printf("\n%s\n",sys);
+      system(sys);                  \
+      printf("\n");
+   }
+   return(arg);
+d181 1
+a181 1
+int yn, c;
+d183 1
+a183 1
+   if (yesno == 0) return 1;
+d185 4
+a188 4
+   printf("%s: %s\n",question,name);
+   printf("Continue (Y/N):"); yn = getchar(); c = getchar();
+   if ((yn != (int) 'y') && (yn != 'Y')) return 0;
+   return 1;
+d196 1
+a196 1
+static int eflg = 0;
+d198 2
+a199 2
+   arg++;
+   if (eflg++ > 4) eflg = 1;
+d201 24
+a224 7
+   if      (eflg == 1) editor = "e";
+   else if (eflg == 2) editor = "emacs";
+   else if (eflg == 3) editor = "nedit";
+   else if (eflg == 4) editor = "vi";
+
+   printf("Editor: %s\n",GetFile(editor));
+   return arg;
+d232 1
+a232 1
+char txt[128], *cp;
+d234 1
+a234 1
+   arg++;
+d236 14
+a249 14
+   cp = GetFileName(&arg);
+   if (cp) {
+      strcpy(txt,cp);
+      if (YesNo("Change lrfsctest config to:",txt)) {
+	 configpath = localconfigpath;
+	 strcpy(configpath,txt);
+      }
+   } else configpath = NULL;
+
+   sprintf(txt,"%s %s",GetFile(editor),configpath);
+   printf("\n%s\n",txt);
+   system(txt);
+   printf("\n");
+   return(arg);
+d256 38
+a293 38
+ArgVal   *v;
+AtomType  at;
+int mod, cnt;
+LrfscDrvrModuleAddress mad;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      if (v->Number) {
+	 mod = v->Number;
+	 if (ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod) < 0) {
+	    IErr("SET_MODULE",&mod);
+	    return arg;
+	 }
+      }
+      module = mod;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt) < 0) {
+      IErr("GET_MODULE_COUNT",NULL);
+      return arg;
+   }
+
+   for (mod=1; mod<=cnt; mod++) {
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&mod);
+      ioctl(lrfsc,LrfscDrvrGET_MODULE_ADDRESS,&mad);
+      printf("Module:%d Adr:0x%08X Ram:0x%08X Vec:0x%02X Lvl:0x%1X",
+	     (int) mod,
+	     (int) mad.VMEAddress,
+	     (int) mad.RamAddress,
+	     (int) mad.InterruptVector,
+	     (int) mad.InterruptLevel);
+      if (mod == module) printf(" <<==");
+      printf("\n");
+   }
+   ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+d295 1
+a295 1
+   return arg;
+d301 1
+a301 1
+int cnt;
+d303 1
+a303 1
+   arg++;
+d305 8
+a312 8
+   ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+   if (module >= cnt) {
+      module = 1;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   } else {
+      module ++;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   }
+d314 1
+a314 1
+   return arg;
+d320 1
+a320 1
+int cnt;
+d322 1
+a322 1
+   arg++;
+d324 8
+a331 8
+   ioctl(lrfsc,LrfscDrvrGET_MODULE_COUNT,&cnt);
+   if (module > 1) {
+      module --;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   } else {
+      module = cnt;
+      ioctl(lrfsc,LrfscDrvrSET_MODULE,&module);
+   }
+d333 1
+a333 1
+   return arg;
+d339 23
+a361 23
+ArgVal   *v;
+AtomType  at;
+int debug;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      if (v->Number) debug = v->Number;
+      else           debug = 0;
+      if (ioctl(lrfsc,LrfscDrvrSET_SW_DEBUG,&debug) < 0) {
+	 IErr("SET_SW_DEBUG",&debug);
+	 return arg;
+      }
+   }
+   debug = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_SW_DEBUG,&debug) < 0) {
+      IErr("GET_SW_DEBUG",NULL);
+      return arg;
+   }
+   if (debug > 0) printf("Debug Level: [0x%X] On\n",debug);
+   else           printf("Debug: Disabled\n");
+d363 1
+a363 1
+   return arg;
+d369 24
+a392 24
+ArgVal   *v;
+AtomType  at;
+int timeout;
+
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      timeout = v->Number;
+      if (ioctl(lrfsc,LrfscDrvrSET_TIMEOUT,&timeout) < 0) {
+	 IErr("SET_TIMEOUT",&timeout);
+	 return arg;
+      }
+   }
+   timeout = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_TIMEOUT,&timeout) < 0) {
+      IErr("GET_TIMEOUT",NULL);
+      return arg;
+   }
+   if (timeout > 0)
+      printf("Timeout: [%d] Enabled\n",timeout);
+   else
+      printf("Timeout: [%d] Disabled\n",timeout);
+d394 1
+a394 1
+   return arg;
+d401 21
+a421 21
+"IrqSrc","State","Control","VmeIrq","RamSelect",
+"Diag1Select","Diag2Select","Diag3Select","Diag4Select",
+"ResCtrlTime","ResCtrl",
+"ResFwdI","ResFwdQ","ResCavI","ResCavQ",
+"SwitchCtrl","SoftSwitch",
+"RefMatrixA","RefMatrixB","RefMatrixC","RefMatrixD",
+"FwdMatrixA","FwdMatrixB","FwdMatrixC","FwdMatrixD",
+"CavMatrixA","CavMatrixB","CavMatrixC","CavMatrixD",
+"DiagTime",
+"RefDiagI","RefDiagQ",
+"FwdDiagI","FwdDiagQ",
+"CavDiagI","CavDiagQ",
+"ErrDiagI","ErrDiagQ",
+"OutDiagI","OutDiagQ",
+"POutDiagI","POutDiagQ",
+"IOutDiagI","IOutDiagQ",
+"KP","KI",
+"RfOffTime",
+"PulseNumber","NextCycle","PresentCycle",
+"VhdlVerH","VhdlVerL",
+"Status","RfOnMaxLength" };
+d425 63
+a487 63
+LrfscDrvrRawIoBlock iob;
+unsigned short array[2];
+unsigned short addr, *data;
+char c, *cp, str[128], *fp;
+int n, radix, nadr;
+
+   printf("EditMemory: [/]: Open, [CR]: Next, [.]: Exit [x]: Hex, [d]: Dec\n\n");
+
+   data = array;
+   addr = address;
+   radix = 16;
+   c = '\n';
+
+   while (1) {
+      iob.Size = 1;
+      iob.Offset = address;
+      iob.RamFlag = ramflg;
+      iob.UserArray = array;
+      if (ioctl(lrfsc,LrfscDrvrRAW_READ,&iob) < 0) IErr("RAW_READ",(int *) &addr);
+
+      if (ramflg) {
+	 if (addr & 1) fp = "I:";
+	 else          fp = "Q:";
+      } else           fp = modflds[addr];
+
+      if (radix == 16) {
+	 if (c=='\n') printf("%16s:Addr:0x%04x: 0x%04x ", fp, (int) addr,(int) *data);
+      } else {
+	 if (c=='\n') printf("%16s:Addr:%04d: %5d ", fp, (int) addr,(int) *data);
+      }
+
+      c = (char) getchar();
+
+      if (c == '/') {
+	 bzero((void *) str, 128); n = 0;
+	 while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+	 nadr = strtoul(str,&cp,radix);
+	 if (cp != str) addr = nadr;
+      }
+
+      else if (c == 'x')  {radix = 16; addr--; continue; }
+      else if (c == 'd')  {radix = 10; addr--; continue; }
+      else if (c == '.')  { c = getchar(); printf("\n"); break; }
+      else if (c == '\n') {
+	 addr ++;
+	 if (ramflg == 0) {
+	    if (addr >= MOD_FIELDS) {
+	       printf("\n");
+	       addr = 0;
+	    }
+	 }
+      }
+
+      else {
+	 bzero((void *) str, 128); n = 0;
+	 str[n++] = c;
+	 while ((c != '\n') && (n < 128)) c = str[n++] = (char) getchar();
+	 *data = strtoul(str,&cp,radix);
+	 if (cp != str) {
+	    if (ioctl(lrfsc,LrfscDrvrRAW_WRITE,&iob) < 0) IErr("RAW_WRITE",(int *) &addr);
+	 }
+      }
+   }
+d493 2
+a494 2
+ArgVal   *v;
+AtomType  at;
+d496 1
+a496 1
+   printf("RawIo on module address map\n");
+d498 9
+a506 9
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      EditMemory(v->Number,0);
+   } else
+      EditMemory(0,0);
+d508 1
+a508 1
+   return arg;
+d514 2
+a515 2
+ArgVal   *v;
+AtomType  at;
+d517 1
+a517 1
+   printf("RawIo on module address map\n");
+d519 9
+a527 9
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   if (at == Numeric) {
+      arg++;
+      EditMemory(v->Number,1);
+   } else
+      EditMemory(0,1);
+d529 1
+a529 1
+   return arg;
+d535 37
+a571 37
+ArgVal   *v;
+AtomType  at;
+long qflag, qsize, qover;
+
+   arg++;
+
+   v = &(vals[arg]);
+   at = v->Type;
+   if (at == Numeric) {
+      arg++;
+      qflag = v->Number;
+
+      if (ioctl(lrfsc,LrfscDrvrSET_QUEUE_FLAG,&qflag) < 0) {
+	 IErr("SET_QUEUE_FLAG",(int *) &qflag);
+	 return arg;
+      }
+   }
+   qflag = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+      IErr("GET_QUEUE_FLAG",NULL);
+      return arg;
+   }
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+      IErr("GET_QUEUE_SIZE",NULL);
+      return arg;
+   }
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_OVERFLOW,&qover) < 0) {
+      IErr("GET_QUEUE_OVERFLOW",NULL);
+      return arg;
+   }
+
+   if (qflag==1) printf("NoQueueFlag: Set,   Queuing is Off\n");
+   else        { printf("NoQueueFlag: ReSet, Queuing is On\n");
+		 printf("QueueSize: %d\n",    (int) qsize);
+		 printf("QueueOverflow: %d\n",(int) qover);
+	       }
+   return arg;
+d578 45
+a622 45
+LrfscDrvrClientConnections cons;
+LrfscDrvrConnection *con;
+LrfscDrvrClientList clist;
+int i, j, k, pid, mypid;
+
+   arg++;
+
+   mypid = getpid();
+
+   if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_LIST,&clist) < 0) {
+      IErr("GET_CLIENT_LIST",NULL);
+      return arg;
+   }
+
+   for (i=0; i<clist.Size; i++) {
+      pid = clist.Pid[i];
+
+      bzero((void *) &cons, sizeof(LrfscDrvrClientConnections));
+      cons.Pid = pid;
+
+      if (ioctl(lrfsc,LrfscDrvrGET_CLIENT_CONNECTIONS,&cons) < 0) {
+	 IErr("GET_CLIENT_CONNECTIONS",NULL);
+	 return arg;
+      }
+
+      if (pid == mypid) printf("Pid: %d (lrfsctest) ",pid);
+      else              printf("Pid: %d ",pid);
+
+      if (cons.Size) {
+	 for (j=0; j<cons.Size; j++) {
+	    con = &(cons.Connections[j]);
+	    printf("[Mod:%d Interrupt:0x%X]:",(int) con->Module,(int) con->Interrupt);
+	    for (k=0; k<LrfscDrvrINTERRUPTS; k++) {
+	       if ((1<<k) & con->Interrupt) {
+		  if (intr_names[k] != NULL)
+		     printf(" %s",intr_names[k]);
+		  else
+		     printf(" Bit%02d",k);
+	       }
+	    }
+	 }
+      } else printf("No connections");
+      printf("\n");
+   }
+   return arg;
+d629 1
+a629 1
+int module;
+d631 1
+a631 1
+   arg++;
+d633 4
+a636 4
+   if (ioctl(lrfsc,LrfscDrvrRESET,NULL) < 0) {
+      IErr("RESET",NULL);
+      return arg;
+   }
+d638 5
+a642 5
+   module = -1;
+   if (ioctl(lrfsc,LrfscDrvrGET_MODULE,&module) < 0) {
+      IErr("GET_MODULE",NULL);
+      return arg;
+   }
+d644 1
+a644 1
+   printf("Reset Module: %d\n",module);
+d646 1
+a646 1
+   return arg;
+d654 6
+a659 6
+   "OVER_REF",
+   "OVER_FWD",
+   "OVER_CAV",
+   "RF_TOO_LONG",
+   "NO_FAST_PROTECT",
+   "MISSING_TICK" };
+d663 2
+a664 2
+static char res[STAT_STR_SIZE];
+int i, msk;
+d666 1
+a666 1
+   bzero((void *) res,STAT_STR_SIZE);
+d668 8
+a675 8
+   for (i=0; i<LrfscDrvrSTATAE; i++) {
+      msk = 1 << i;
+      if (stat & msk) {
+	 strcat(res,statnames[i]);
+	 strcat(res,":");
+      }
+   }
+   return res;
+d682 1
+a682 1
+static char tbuf[128];
+d684 2
+a685 2
+char tmp[128];
+char *yr, *ti, *md, *mn, *dy;
+d687 2
+a688 2
+    bzero((void *) tbuf, 128);
+    bzero((void *) tmp, 128);
+d690 15
+a704 15
+    if (tod) {
+	ctime_r (&tod, tmp);
+
+        tmp[3] = 0;
+        dy = &(tmp[0]);
+        tmp[7] = 0;
+        mn = &(tmp[4]);
+        tmp[10] = 0;
+        md = &(tmp[8]);
+        if (md[0] == ' ')
+            md[0] = '0';
+        tmp[19] = 0;
+        ti = &(tmp[11]);
+        tmp[24] = 0;
+        yr = &(tmp[20]);
+d706 1
+a706 1
+	sprintf (tbuf, "%s-%s/%s/%s %s"  , dy, md, mn, yr, ti);
+d708 1
+a708 1
+    } else sprintf(tbuf, "--- Zero ---");
+d710 1
+a710 1
+    return (tbuf);
+d717 2
+a718 2
+LrfscDrvrVersion version;
+time_t tod;
+d720 1
+a720 1
+   arg++;
+d722 5
+a726 5
+   bzero((void *) &version, sizeof(LrfscDrvrVersion));
+   if (ioctl(lrfsc,LrfscDrvrGET_VERSION,&version) < 0) {
+      IErr("GET_VERSION",NULL);
+      return arg;
+   }
+d728 2
+a729 2
+   tod = version.Driver;
+   printf("Drvr: [%u] %s\n",(int) tod,TimeToStr(tod));
+d731 2
+a732 2
+   tod = version.Firmware;
+   printf("VHDL: [%u] %s\n",(int) tod,TimeToStr(tod));
+d734 2
+a735 2
+   tod = COMPILE_TIME;
+   printf("Test: [%u] %s\n",(int) tod,TimeToStr(tod));
+d737 1
+a737 1
+   return arg;
+d745 120
+a864 2
+ArgVal   *v;
+AtomType  at;
+d866 1
+a866 2
+LrfscDrvrConnection con;
+int i, cc, qflag, qsize, nowait, interrupt, cnt;
+d868 281
+a1148 109
+   arg++;
+   v = &(vals[arg]);
+   at = v->Type;
+
+   nowait = 0;
+   if (at == Operator) {
+      if (v->OId == OprNOOP) {
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 printf("WaitInterrupt: [-] Optional No Wait, Connect only\n");
+	 printf("WaitInterrupt: Sources are:\n");
+	 for (i=0; i<LrfscDrvrINTERRUPTS; i++) {
+	    if (intr_names[i] != NULL) {
+	       printf("0x%04X %s\n",(1<<i),intr_names[i]);
+	    }
+	 }
+	 return arg;
+      }
+      if (v->OId == OprMI) {    /* A - means don't wait, just connect */
+	 arg++;
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 nowait = 1;
+      }
+   }
+
+   interrupt = 0;
+   if (at == Numeric) {
+      arg++;
+
+      if (v->Number) {
+	 interrupt  = v->Number;
+	 con.Module = module;
+	 con.Interrupt   = interrupt;
+	 if (ioctl(lrfsc,LrfscDrvrCONNECT,&con) < 0) {
+	    IErr("CONNECT",&interrupt);
+	    return arg;
+	 }
+
+	 v = &(vals[arg]);
+	 at = v->Type;
+
+	 if (v->Number) {
+	    arg++;
+	    con.Pulses = v->Number;
+	 }
+
+	 connected = 1;
+      } else {
+	 con.Module     = module;
+	 con.Interrupt  = 0;
+	 if (ioctl(lrfsc,LrfscDrvrDISCONNECT,&con) < 0) {
+	    IErr("DISCONNECT",&interrupt);
+	    return arg;
+	 }
+	 connected = 0;
+	 printf("Disconnected from all interrupts\n");
+	 return arg;
+      }
+   }
+
+   if (connected == 0) {
+      printf("WaitInterrupt: Error: No connections to wait for\n");
+      return arg;
+   }
+
+   if (nowait) {
+      printf("WaitInterrupt: Connect: No Wait: OK\n");
+      return arg;
+   }
+
+   cnt = 0;
+   do {
+      cc = read(lrfsc,&con,sizeof(LrfscDrvrConnection));
+      if (cc <= 0) {
+	 printf("Time out or Interrupted call\n");
+	 return arg;
+      }
+      if (interrupt != 0) {
+	 if (con.Interrupt & interrupt) break;
+      } else break;
+      if (cnt++ > 64) {
+	 printf("Aborted wait loop after 64 iterations\n");
+	 return arg;
+      }
+   } while (True);
+
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_FLAG,&qflag) < 0) {
+      IErr("GET_QUEUE_FLAG",NULL);
+      return arg;
+   }
+
+   if (ioctl(lrfsc,LrfscDrvrGET_QUEUE_SIZE,&qsize) < 0) {
+      IErr("GET_QUEUE_SIZE",NULL);
+      return arg;
+   }
+
+   printf("Mod[%d] Int[0x%X] Pls[0x%X]\n",
+	  (int) con.Module,
+	  (int) con.Interrupt,
+	  (int) con.Pulses);
+
+   if (qflag == 0) {
+      if (qsize) printf(" Queued: %d",(int) qsize);
+   }
+   printf("\n");
+d1150 1
+a1150 1
+   return arg;
+@
