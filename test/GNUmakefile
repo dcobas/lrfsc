@@ -34,5 +34,6 @@ lrfsctest.$(CPU).o: $(TEST) $(HDRS)
 install: lrfsctest.$(CPU)
 	@for f in $(ACCS); do \
 	    dsc_install lrfsctest.$(CPU) /acc/dsc/$$f/$(CPU)/$(BSP)/$(DDIR); \
+	    dsc_install lrfsctest.config /acc/dsc/$$f/$(CPU)/$(BSP)/$(DDIR); \
 	done;
 

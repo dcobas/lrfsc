@@ -42,7 +42,7 @@ pid_t child;
 
 /**************************************************************************/
 
-char *defaultconfigpath = CONF_DIR "/lrfsctest.config";
+char *defaultconfigpath = "/usr/local/drivers/lrfsc/lrfsctest.config";
 
 char *configpath = NULL;
 char localconfigpath[128];  /* After a CD */
@@ -71,7 +71,7 @@ int i, j;
       configpath = "./lrfsctest.config";
       gpath = fopen(configpath,"r");
       if (gpath == NULL) {
-	 configpath = TEMP_DIR "/lrfsctest.config";
+	 configpath = CONF_DIR "/lrfsctest.config";
 	 gpath = fopen(configpath,"r");
 	 if (gpath == NULL) {
 	    configpath = defaultconfigpath;
@@ -1443,7 +1443,7 @@ unsigned long pl, plmx;
       return arg;
    }
 
-   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plmx) < 0) {
+   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&pl) < 0) {
       IErr("GET_MAX_PULSE_LENGTH",(int *) &pl);
       return arg;
    }
@@ -1554,10 +1554,9 @@ int i;
    if (fp) {
 
       for (i=0; i<LrfscDrvrCONFIG_POINTS; i++) {
-	 fprintf(fp,"%05d %05d %05d\n",
-		 cbuf.Array[i].Ticks,
-		 cbuf.Array[i].IQ.I,
-		 cbuf.Array[i].IQ.Q);
+	 fprintf(fp,"%05d %05d\n",
+		 cbuf.Array[i].I,
+		 cbuf.Array[i].Q);
       }
    }
    fclose(fp);
@@ -1661,7 +1660,7 @@ FILE *fp;
 char *cp;
 
 char fnam[LN];
-int i;
+int i, I, Q;
 
    arg++;
    v = &(vals[arg]);
@@ -1696,11 +1695,9 @@ int i;
    if (fp) {
 
       for (i=0; i<LrfscDrvrCONFIG_POINTS; i++) {
-	 fscanf(fp,
-		"%d %d %d\n",
-		(int *) (unsigned short *) &(cbuf.Array[i].Ticks),
-		(int *) (signed   short *) &(cbuf.Array[i].IQ.I ),
-		(int *) (signed   short *) &(cbuf.Array[i].IQ.Q ));
+	 fscanf(fp, "%d %d\n",&I ,&Q);
+	 cbuf.Array[i].I = (short) I;
+	 cbuf.Array[i].Q = (short) Q;
       }
    }
    fclose(fp);
@@ -1797,13 +1794,14 @@ unsigned long plen;
       return arg;
    }
 
-   if (SampSkip == 0) {
-      if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plen) < 0) {
-	 IErr("GET_PULSE_LENGTH",NULL);
-	 return arg;
-      }
-      SampSkip = plen / (LrfscDrvrBUF_IQ_ENTRIES * LrfscDrvrTICK_TO_PAIR);
+   if (ioctl(lrfsc,LrfscDrvrGET_PULSE_LENGTH,&plen) < 0) {
+      IErr("GET_PULSE_LENGTH",NULL);
+      return arg;
    }
+
+   if (SampSkip == 0)
+      SampSkip = plen / (LrfscDrvrBUF_IQ_ENTRIES * LrfscDrvrTICK_TO_PAIR);
+
 
    if (ioctl(lrfsc,LrfscDrvrSET_SKIP_COUNT,&SampSkip) < 0) {
       IErr("LrfscDrvrSET_SKIP_COUNT",(int *) &SampSkip);
@@ -1901,7 +1899,6 @@ unsigned int tm;
    dbuf.Size   = LrfscDrvrBUF_IQ_ENTRIES;
    dbuf.Pulse  = SampPulse;
    dbuf.Choice = v->Number;
-   dbuf.Cycle  = cyc;
    dbuf.Valid  = 1;
 
    simulate = 0;
@@ -1913,18 +1910,17 @@ unsigned int tm;
       simulate       = 1;
    }
 
-   printf("Diagnostic: Size:%d Pulse:%d Choice:%s Cycle:%d Valid:%d\n",
+   printf("Diagnostic: Size:%d Pulse:%d Choice:%s Valid:%d\n",
 	  (int) dbuf.Size,
 	  (int) dbuf.Pulse,
 		signames[dbuf.Choice],
-	  (int) dbuf.Cycle,
 	  (int) dbuf.Valid);
 
    cp = GetFile(signames[dbuf.Choice]);
 
    if (dbuf.Valid) {
-      sprintf(fnamI,"%sI.%02d.%1d",cp, (int) dbuf.Cycle, (int) dbuf.Pulse);
-      sprintf(fnamQ,"%sQ.%02d.%1d",cp, (int) dbuf.Cycle, (int) dbuf.Pulse);
+      sprintf(fnamI,"%sI.%1d",cp, (int) dbuf.Pulse);
+      sprintf(fnamQ,"%sQ.%1d",cp, (int) dbuf.Pulse);
       umask(0);
       fpI = fopen(fnamI,"w");
       fpQ = fopen(fnamQ,"w");

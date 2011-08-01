@@ -1,2 +1,16 @@
-This is the LLRF driver ported to Linux by 
-Julian Lewis at CERN BE/CO/HT
+This version is installed in Linac-3.
+There is a GIT archive aswell as an RCS directory in each directory.
+The directories are...
+
+   driver   Diver sources and make file
+   install  The lynxos install program
+   lib      Library sources and makefile
+   test     Driver test program sources and makefile
+
+This directory is an exact copy of /acc/src/dsc/drivers/lrfsc
+There is a port of an older version to Linux, but that version will need to
+be upgraded to reflect the logic here. The FPGA has been changed a lot, and
+there were misunderstandings in the way the diagnostics worked. This version
+is fully tested and is operational.
+
+Julian 21st/July/2011

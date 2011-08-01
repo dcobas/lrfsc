@@ -165,25 +165,17 @@ int                             i, j, rval;
 }
 
 /* ====================================================================== */
-/* Convert Time IQ value to Time IQ increment                             */
-/* Result is stored in the module context                                 */
+/* Copy configuration to module context, hardware will be updated in ISR  */
+/* or imediatley if the state is configuration.                           */
 /* ====================================================================== */
 
-int IQValToInc(LrfscDrvrModuleContext *mcon, LrfscDrvrConfigBuf *buf) {
+int ConfToMcon(LrfscDrvrModuleContext *mcon, LrfscDrvrConfigBuf *buf) {
 
 LrfscDrvrConfigArray *mcdst;        /* Module Context Configuration array */
-LrfscDrvrConfigPoint  pi, *p1, *p2; /* Initial, (n)th, (n+1)th */
 
-LrfscDrvrVector      *vec;          /* Vector */
-LrfscDrvrVectorArray *va;           /* Vector array */
-
-int i;
-
-float fI, fQ, fT;
-
-   if ((buf->Points > LrfscDrvrCONFIG_POINTS)
-   ||  (buf->Which  > LrfscDrvrCONFIGS)
-   ||  (buf->Cycle  > LrfscDrvrCYCLES)) {
+   if ((buf->Points >  LrfscDrvrCONFIG_POINTS)
+   ||  (buf->Which  >  LrfscDrvrCONFIGS)
+   ||  (buf->Cycle  >= LrfscDrvrCYCLES)) {
 
       pseterr(EINVAL);
       return SYSERR;
@@ -193,68 +185,16 @@ float fI, fQ, fT;
 
    mcdst = &((*mcon).Configs[(int) buf->Which][(int) buf->Cycle]);
    bcopy((void *) buf->Array, (void *) mcdst, sizeof(LrfscDrvrConfigArray));
-   mcon->ValidVecs[buf->Which][buf->Cycle] = 0;
-
-   /* Target vector array to receive conversion */
-
-   va =&((*mcon).Vectors[(int) buf->Which][(int) buf->Cycle]);
-   vec = &((*va)[0]);
-
-   p2 = &(buf->Array[0]);                /* First array entry */
-   pi = *p2;                             /* Initial value */
-
-   vec->Next  = sizeof(LrfscDrvrVector)/2;
-   vec->Ticks = 1;                       /* Initial increment */
-   vec->IncI.Long = (int) pi.IQ.I << 16;
-   vec->IncQ.Long = (int) pi.IQ.Q << 16;
-
-   for (i=1; i<buf->Points; i++) {
-
-      vec = &((*va)[i]);
-
-      p1 = p2;
-      p2 = &(buf->Array[i]);
-
-      fT = (float) p2->Ticks - p1->Ticks;
-      if (fT > 0) {
-	 fI = (float) ((p2->IQ.I - p1->IQ.I) / fT) * (float) 0x10000;
-	 fQ = (float) ((p2->IQ.Q - p1->IQ.Q) / fT) * (float) 0x10000;
-
-	 vec->Next      = (i+1) * (sizeof(LrfscDrvrVector)/2);
-	 vec->IncI.Long = (int) fI;
-	 vec->IncQ.Long = (int) fQ;
-	 vec->Ticks     = (int) fT;
-      } else {
-	 pseterr(EINVAL);
-	 return SYSERR;
-      }
-   }
-
-   if (buf->Flag == LrfscDrvrFunctionREPEAT) {
-      vec            = &((*va)[i]);
-      vec->Next      = 0;
-      vec->IncI.Long = (int) (pi.IQ.I - p2->IQ.I) << 16;
-      vec->IncQ.Long = (int) (pi.IQ.Q - p2->IQ.Q) << 16;
-      vec->Ticks     = 1;
-      i++;
-   }
-   vec = &((*va)[i]);
-   vec->Next      = 0;
-   vec->Ticks     = 0xFFFF;
-   vec->IncI.Long = 0;
-   vec->IncQ.Long = 0;
-
-   mcon->ValidVecs[buf->Which][buf->Cycle] = 1;
+   mcon->ValidConfigs[buf->Which][buf->Cycle] = 1;
 
    return OK;
 }
 
 /* ====================================================================== */
-/* Convert Time IQ increment to Time IQ value                             */
-/* Result is stored in the module config buf                              */
+/* Retrieve configuration from module context                             */
 /* ====================================================================== */
 
-int IncToIQVal(LrfscDrvrModuleContext *mcon, LrfscDrvrConfigBuf *buf) {
+int MconToConf(LrfscDrvrModuleContext *mcon, LrfscDrvrConfigBuf *buf) {
 
 LrfscDrvrConfigArray *mcsrc;        /* Module Context Configuration array */
 
@@ -280,8 +220,8 @@ static int SetConfiguration(LrfscDrvrModuleContext *mcon, LrfscDrvrConfig cnf, i
 
 volatile LrfscDrvrModuleAddress *moad;        /* Module address, vector, level */
 volatile LrfscDrvrMemoryMap     *mmap;        /* Module Memory map */
-volatile LrfscDrvrVector        *dst;
-LrfscDrvrVector                 *src;
+volatile LrfscDrvrIQPair        *dst;
+volatile LrfscDrvrIQPair        *src;
 
 int i, ps;
 unsigned short old;
@@ -297,20 +237,15 @@ unsigned short old;
       EIEIO;
       SYNC;
 
-      src = &((*mcon).Vectors[(int) cnf][(int) cyc][0]);
+      src = &((*mcon).Configs[(int) cnf][(int) cyc][0]);
 
-      dst = (volatile LrfscDrvrVector *)
+      dst = (volatile LrfscDrvrIQPair *)
 	    ( (unsigned long) moad->RamAddress
 	  |   (unsigned long) ((cyc & 31) << 14) );
 
       for (i=0; i<LrfscDrvrCONFIG_POINTS; i++) {
-	 dst->Next              = src->Next;
-	 dst->Ticks             = src->Ticks;
-	 dst->IncI.Shorts.High  = src->IncI.Shorts.High;
-	 dst->IncI.Shorts.Low   = src->IncI.Shorts.Low;
-	 dst->IncQ.Shorts.High  = src->IncQ.Shorts.High;
-	 dst->IncQ.Shorts.Low   = src->IncQ.Shorts.Low;
-	 if (dst->Next == 0) break;
+	 dst->I = src->I;
+	 dst->Q = src->Q;
 	 dst++; src++;
       }
       mmap->RamSelect = old;
@@ -420,30 +355,11 @@ volatile LrfscDrvrMemoryMap     *mmap; /* Module Memory map */
 unsigned long                    addr; /* VME base address */
 unsigned long                    coco; /* Completion code */
 
-LrfscDrvrVector                 *vec;  /* Vector */
-LrfscDrvrVectorArray            *va;   /* Vector array */
-
 struct pdparam_master param;
 volatile short *vmeaddr;
 volatile short *ramaddr;
 
 unsigned short wrd;
-int cy;
-
-#if 0
-LrfscDrvrMemoryMap *pmap;
-   pmap = NULL;
-   cprintf("IrqSource    %03d 0x%08X \n",(int) &(pmap->IrqSource    ),  (int) &(pmap->IrqSource    ));
-   cprintf("SignalChoice %03d 0x%08X \n",(int) &(pmap->SignalChoices),  (int) &(pmap->SignalChoices));
-   cprintf("ResCtrl      %03d 0x%08X \n",(int) &(pmap->ResCtrl      ),  (int) &(pmap->ResCtrl      ));
-   cprintf("Matrix       %03d 0x%08X \n",(int) &(pmap->Matrix       ),  (int) &(pmap->Matrix       ));
-   cprintf("SnapShot     %03d 0x%08X \n",(int) &(pmap->SnapShot     ),  (int) &(pmap->SnapShot     ));
-   cprintf("Pic          %03d 0x%08X \n",(int) &(pmap->Pic          ),  (int) &(pmap->Pic          ));
-   cprintf("RfOffTime    %03d 0x%08X \n",(int) &(pmap->RfOffTime    ),  (int) &(pmap->RfOffTime    ));
-   cprintf("VhdlVerH     %03d 0x%08X \n",(int) &(pmap->VhdlVerH     ),  (int) &(pmap->VhdlVerH     ));
-   cprintf("Status       %03d 0x%08X \n",(int) &(pmap->Status       ),  (int) &(pmap->Status       ));
-   cprintf("RfOnMaxLen   %03d 0x%08X \n",(int) &(pmap->RfOnMaxLen   ),  (int) &(pmap->RfOnMaxLen   ));
-#endif
 
    /* Compute Virtual memory address as seen from system memory mapping */
 
@@ -536,7 +452,7 @@ LrfscDrvrMemoryMap *pmap;
    mcon->SwitchCtrl              = 0;
    mcon->SoftSwitch              = LrfscDrvrSotfSwitchMAIN_CLOSED;
    mcon->DiagTime                = 0x2000;
-   mcon->RfOnMaxLen              = 0x8000;
+   mcon->RfOnMaxLen              = 45056;
    mcon->Pic.KI                  = 246;
    mcon->Pic.KP                  = 640;
    mcon->SignalChoices[0]        = LrfscDrvrDiagCAVITY;
@@ -555,30 +471,7 @@ LrfscDrvrMemoryMap *pmap;
    mcon->Coefficients[2].MatrixB = 0x0EC6;
    mcon->Coefficients[2].MatrixC = 0xF13A;
    mcon->Coefficients[2].MatrixD = 0xED2C;
-
-   for (cy=0; cy<LrfscDrvrCYCLES; cy++) {
-
-      va              = &((*mcon).Vectors[LrfscDrvrConfigSETPOINTS][cy]);
-      vec             = &((*va)[0]);
-      vec->Next       = sizeof(LrfscDrvrVector)/2;
-      vec->Ticks      = 1;
-      vec->IncI.Long  = 4000 << 16;
-      vec->IncQ.Long  = 0;
-
-      vec             = &((*va)[1]);
-      vec->Next       = 0;
-      vec->Ticks      = 0xFFFF;
-      vec->IncI.Long  = 0;
-      vec->IncQ.Long  = 0;
-
-      va              = &((*mcon).Vectors[LrfscDrvrConfigFEEDFORWARD][cy]);
-      vec             = &((*va)[0]);
-      vec->Next       = 0;
-      vec->Ticks      = 0xFFFF;
-      vec->IncI.Long  = 0;
-      vec->IncQ.Long  = 0;
-   }
-
+   mcon->Pulse                   = 1;
    return Reset(mcon);
 }
 
@@ -639,18 +532,17 @@ volatile LrfscDrvrMemoryMap     *mmap;
 LrfscDrvrClientContext          *ccon;
 LrfscDrvrClientQueue            *queue;
 LrfscDrvrConnection              rb;
-unsigned int                     i,j,iq,ci,si,vd,skpstr,skpcnt;
-unsigned short                   isrc, csrc, pnum, cnum;
-LrfscDrvrDiagSignalChoice        sigc;
-LrfscDrvrIQPair                 *ram;
-LrfscDrvrIQPair                 *src, *dst;
+unsigned int                     i, j, iq, ci;
+unsigned short                   isrc, csrc, pnum, cnum, npnum;
 
    mmap =  (LrfscDrvrMemoryMap *) mcon->Address.VMEAddress;
-   ram  =  (LrfscDrvrIQPair    *) mcon->Address.RamAddress;
 
    isrc = mmap->IrqSource;
    cnum = mmap->PresCycle;
    pnum = mmap->PulseNumber;
+
+   if (isrc & LrfscDrvrInterruptSTART_CYCLE) npnum = 1;
+   else                                      npnum = pnum + 1;
 
    bzero((void *) &rb, sizeof(LrfscDrvrConnection));
    rb.Module = mcon->ModuleIndex + 1;
@@ -687,31 +579,18 @@ LrfscDrvrIQPair                 *src, *dst;
 	 }
       }
 
-      if (isrc & LrfscDrvrInterruptPULSE) {
-	 mmap->Control |= LrfscDrvrControlDO_AQN;
-	 for (si=0; si<LrfscDrvrDiagSIGNAL_CHOICES; si++) {
-	    sigc = (LrfscDrvrDiagSignalChoice) (unsigned short) mmap->SignalChoices[si];
-	    skpstr = mcon->SkipStart;
-	    skpcnt = mcon->SkipCount;
-	    if (skpcnt == 0)
-	       skpcnt = mmap->RfOffTime / LrfscDrvrBUF_IQ_ENTRIES;
-	    if ((mcon->Pulse == pnum) && (mcon->State == LrfscDrvrStatePROD_REMOTE)) {
-	       mmap->RamSelect = (unsigned short) (LrfscDrvrRamSelection) si + LrfscDrvrRamDIAG1;
-	       for (i=skpstr, j=0; j<LrfscDrvrBUF_IQ_ENTRIES; i+=skpcnt, j++) {
-		  dst = &((*mcon).Diags[sigc][cnum][j]);
-		  src = &(ram[i]);
-		  dst->I = src->I;
-		  dst->Q = src->Q;
-		  vd = 1;
-	       }
-	    } else vd = 0;
-	    mcon->ValidDiags[sigc][cnum] = vd;
+      if (mcon->State == LrfscDrvrStatePROD_REMOTE) {
+	 if ((!mcon->AqnDone) && (mcon->Pulse == npnum)) {
+	    mmap->Control |= LrfscDrvrControlDO_AQN;
+	    mcon->AqnDone = npnum;
 	 }
+      }
 
+      if (isrc & LrfscDrvrInterruptPULSE) {
 	 for (i=0; i<LrfscDrvrCONFIGS; i++) {
 	    for (j=0; j<LrfscDrvrCYCLES; j++) {
-	       if (mcon->ValidVecs[i][j]) {
-		  mcon->ValidVecs[i][j] = 0;
+	       if (mcon->ValidConfigs[i][j]) {
+		  mcon->ValidConfigs[i][j] = 0;
 		  mmap->State = 0;
 		  mmap->RamSelect = (unsigned short) i;
 		  SetConfiguration(mcon, (LrfscDrvrConfig) i, j);
@@ -719,7 +598,6 @@ LrfscDrvrIQPair                 *src, *dst;
 	       }
 	    }
 	 }
-
       }
       isrc = mmap->IrqSource;
       pnum = mmap->PulseNumber;
@@ -739,19 +617,6 @@ volatile LrfscDrvrModuleAddress *moad;     /* Modules address */
 LrfscDrvrWorkingArea            *wa;
 
    /*Allocate the driver working area*/
-
-   cprintf("Lrfsc: Sizeof Working Area:0x%08X[%d]\n",
-	   sizeof(LrfscDrvrWorkingArea),
-	   sizeof(LrfscDrvrWorkingArea));
-   cprintf("Lrfsc: Sizeof Module Context:0x%08X[%d]\n",
-	   sizeof(LrfscDrvrModuleContext),
-	   sizeof(LrfscDrvrModuleContext));
-   cprintf("Lrfsc: Sizeof Client Context:0x%08X[%d]\n",
-	   sizeof(LrfscDrvrClientContext),
-	   sizeof(LrfscDrvrClientContext));
-   cprintf("Lrfsc: Sizeof Vector Array:0x%08X[%d]\n",
-	   sizeof(LrfscDrvrVectorArray),
-	   sizeof(LrfscDrvrVectorArray));
 
    wa = (LrfscDrvrWorkingArea *) sysbrk(sizeof(LrfscDrvrWorkingArea));
    if (!wa) {
@@ -905,12 +770,12 @@ struct file *flp;
 LrfscDrvrControlFunction cm;
 char *arg; {
 
-int cnum;                               /* Client number */
-int rcnt, wcnt;                         /* Readable, Writable byte counts at arg address */
-long lav;                                               /* Long value from arg */
+int cnum;                       /* Client number */
+int rcnt, wcnt;                 /* Readable, Writable byte counts at arg address */
+long lav;                       /* Long value from arg */
 volatile long *lap;             /* Long Value pointed to by Arg */
 volatile unsigned short *sap;   /* Short IO value pointer */
-unsigned short sav;                             /* Short IO value */
+unsigned short sav;             /* Short IO value */
 
 volatile LrfscDrvrMemoryMap     *mmap;
 
@@ -934,8 +799,10 @@ LrfscDrvrModuleAddress          *moadbuf;
 LrfscDrvrClientList             *clsbuf;
 LrfscDrvrClientConnections      *ccnbuf;
 LrfscDrvrIQPair                 *src, *dst;
+LrfscDrvrIQPair                 *ram;
+LrfscDrvrDiagSignalChoice       sigc;
 
-int i, j, err, cynum, size;
+int i, j, si, err, size, skpstr, skpcnt;
 
    /* Check argument contains a valid address for reading or writing. */
    /* We can not allow bus errors to occur inside the driver due to   */
@@ -1361,7 +1228,11 @@ int i, j, err, cynum, size;
       case LrfscDrvrSET_CYCLE_CONFIG:                         /* LrfscDrvrConfigBuf Set a cycle configuration */
 	 if (rcnt >= sizeof(LrfscDrvrConfigBuf)) {
 	    confbuf = (LrfscDrvrConfigBuf *) arg;
-	    err = IQValToInc(mcon, confbuf);
+	    err = ConfToMcon(mcon, confbuf);
+	    if (mcon->State == LrfscDrvrStateCONFIG) {
+	       SetConfiguration(mcon, confbuf->Which, confbuf->Cycle);
+	       mcon->ValidConfigs[confbuf->Which][confbuf->Cycle] = 0;
+	    }
 	    return err;
 	 }
       break;
@@ -1369,7 +1240,7 @@ int i, j, err, cynum, size;
       case LrfscDrvrGET_CYCLE_CONFIG:                         /* LrfscDrvrConfigBuf Get a cycle configuration */
 	 if (rcnt >= sizeof(LrfscDrvrConfigBuf)) {
 	    confbuf = (LrfscDrvrConfigBuf *) arg;
-	    return IncToIQVal(mcon, confbuf);
+	    return MconToConf(mcon, confbuf);
 	    return OK;
 	 }
       break;
@@ -1404,14 +1275,28 @@ int i, j, err, cynum, size;
 	    diagbuf = (LrfscDrvrDiagBuf *) arg;
 	    diagbuf->SkipStart = mcon->SkipStart;
 	    diagbuf->SkipCount = mcon->SkipCount;
-	    cynum = diagbuf->Cycle;
 	    sigch = diagbuf->Choice;
-	    diagbuf->Valid = mcon->ValidDiags[sigch][cynum];
-	    for (i=0; i<diagbuf->Size; i++) {
-	       dst  = &((*diagbuf).Array[i]);
-	       src  = &((*mcon).Diags[sigch][cynum][i]);
-	       *dst = *src;
+	    diagbuf->Valid = mcon->AqnDone;
+
+	    ram = (LrfscDrvrIQPair *) mcon->Address.RamAddress;
+	    for (si=0; si<LrfscDrvrDiagSIGNAL_CHOICES; si++) {
+	       sigc = (LrfscDrvrDiagSignalChoice) (unsigned short) mmap->SignalChoices[si];
+	       if (sigch == sigc) {
+		  mmap->RamSelect = (unsigned short) (LrfscDrvrRamSelection) si + LrfscDrvrRamDIAG1;
+		  skpstr = mcon->SkipStart;
+		  skpcnt = mcon->SkipCount;
+		  if (skpcnt == 0)
+		     skpcnt = mmap->RfOffTime / LrfscDrvrBUF_IQ_ENTRIES;
+
+		  for (i=skpstr, j=0; j<LrfscDrvrBUF_IQ_ENTRIES; i+=skpcnt, j++) {
+		     dst = &((*diagbuf).Array[j]);
+		     src = &(ram[i]);
+		     dst->I = src->I;
+		     dst->Q = src->Q;
+		  }
+	       }
 	    }
+	    mcon->AqnDone = 0;
 	    return OK;
 	 }
       break;

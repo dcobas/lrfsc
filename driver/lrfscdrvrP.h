@@ -55,33 +55,12 @@ typedef struct {
  } LrfscDrvrPicRegisters;
 
 /* ===================================================== */
-/* Configuration ram layout                              */
-/* ===================================================== */
-
-typedef struct {
-   short              High;
-   short              Low;
- } LrfscDrvr2Shorts;
-
-typedef union {
-   int                Long;
-   LrfscDrvr2Shorts   Shorts;
- } LrfscDrvrIncrement;
-
-typedef struct __attribute__ ((__packed__)) {
-   unsigned short     Next;     /* Next vector short address */
-   unsigned short     Ticks;
-   LrfscDrvrIncrement IncI;
-   LrfscDrvrIncrement IncQ;
- } LrfscDrvrVector;
-
-typedef LrfscDrvrVector LrfscDrvrVectorArray[LrfscDrvrBUF_IQ_ENTRIES];
-
-/* ===================================================== */
-/* Diagnostic Ram Layout                                 */
+/* Diagnostic and Config Ram Layout                                 */
 /* ===================================================== */
 
 typedef LrfscDrvrIQPair LrfcsDrvrRamIqArray[LrfscDrvrRAM_IQ_ENTRIES];
+
+typedef LrfscDrvrIQPair LrfcsDrvrConfigArray[LrfscDrvrCONFIG_POINTS];
 
 /* ===================================================== */
 /* Module address has base address in it                 */
@@ -149,6 +128,7 @@ typedef struct {
    unsigned long                ModuleIndex;
    unsigned long                SkipCount;
    unsigned long                SkipStart;
+   unsigned long                AqnDone;
    LrfscDrvrPulse               Pulse;
    LrfscDrvrInterrupt           Clients[LrfscDrvrCLIENT_CONTEXTS];
    LrfscDrvrState               State;
@@ -162,12 +142,9 @@ typedef struct {
    unsigned long                DiagTime;
    unsigned long                RfOnMaxLen;
    LrfscDrvrConfigArray         Configs[LrfscDrvrCONFIGS][LrfscDrvrCYCLES];
-   LrfscDrvrVectorArray         Vectors[LrfscDrvrCONFIGS][LrfscDrvrCYCLES];
-   unsigned long                ValidVecs[LrfscDrvrCONFIGS][LrfscDrvrCYCLES];
+   unsigned long                ValidConfigs[LrfscDrvrCONFIGS][LrfscDrvrCYCLES];
    LrfscDrvrMatrixCoefficients  Coefficients[LrfscDrvrMatrixMATRICES];
    LrfscDrvrDiagChoices         SignalChoices;
-   LrfscDrvrBufIqArray          Diags[LrfscDrvrDiagSIGNALS][LrfscDrvrCYCLES];
-   unsigned long                ValidDiags[LrfscDrvrDiagSIGNALS][LrfscDrvrCYCLES];
 } LrfscDrvrModuleContext;
 
 /* ===================================================== */

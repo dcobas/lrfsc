@@ -1,0 +1,2 @@
+plot "/dsc/local/data/lrfsc/config/OutputI.00.1" with line,"/dsc/local/data/lrfsc/config/OutputQ.00.1" with line
+pause -1

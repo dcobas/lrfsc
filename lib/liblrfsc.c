@@ -568,10 +568,10 @@ int fdu, i;
 
    if (diag == NULL)                                 return LibLrfscErrorNULL;
 
-   if (diag->Size   > LrfscDrvrBUF_IQ_ENTRIES)       return LibLrfscErrorRANGE;
-   if (diag->Pulse  >= LrfscDrvrPULSES)              return LibLrfscErrorRANGE;
-   if (diag->Choice >= LrfscDrvrDiagSIGNALS)         return LibLrfscErrorRANGE;
-   if (diag->Cycle  >= 32)                           return LibLrfscErrorRANGE;
+   if  (diag->Size   >  LrfscDrvrBUF_IQ_ENTRIES)     return LibLrfscErrorRANGE;
+   if ((diag->Pulse  < 1)
+   ||  (diag->Pulse  >  LrfscDrvrPULSES))            return LibLrfscErrorRANGE;
+   if  (diag->Choice >= LrfscDrvrDiagSIGNALS)        return LibLrfscErrorRANGE;
 
 
    if (ioctl(fdu,LrfscDrvrGET_DIAGNOSTICS,diag) < 0) return LibLrfscErrorIO;

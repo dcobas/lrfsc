@@ -237,33 +237,22 @@ typedef struct {
 /*    LrfscDrvrSET_CYCLE_CONFIG         */
 /*    LrfscDrvrGET_CYCLE_CONFIG         */
 
-#define LrfscDrvrCYCLES 0x10
+#define LrfscDrvrCYCLES 32
 #define LrfscDrvrCONFIGS 2
-#define LrfscDrvrCONFIG_POINTS 0x200
+#define LrfscDrvrCONFIG_POINTS 4096
 
 typedef enum {
    LrfscDrvrConfigSETPOINTS,   /* SetPoints   */
    LrfscDrvrConfigFEEDFORWARD  /* FeedForward */
  } LrfscDrvrConfig;
 
-typedef struct {
-   unsigned short  Ticks;   /* 5MHz clock ticks */
-   LrfscDrvrIQPair IQ;      /* IQ Value */
- } LrfscDrvrConfigPoint;
-
-typedef enum {
-   LrfscDrvrFunctionSTOP,   /* Stop the function */
-   LrfscDrvrFunctionREPEAT, /* Repeat the function */
- } LrfscDrvrFunction;
-
-typedef LrfscDrvrConfigPoint LrfscDrvrConfigArray[LrfscDrvrCONFIG_POINTS];
+typedef LrfscDrvrIQPair LrfscDrvrConfigArray[LrfscDrvrCONFIG_POINTS];
 
 typedef struct {
-   LrfscDrvrConfig      Which;                          /* Which configuration ram */
-   LrfscDrvrFunction    Flag;                           /* Repeat/Stop flag */
-   unsigned long        Points;                         /* Number of points in buffer */
-   unsigned long        Cycle;                          /* Cycle number 0..31 */
-   LrfscDrvrConfigArray Array;                          /* Configuration array */
+   LrfscDrvrConfig      Which;   /* Which configuration ram */
+   unsigned long        Points;  /* Number of points in buffer */
+   unsigned long        Cycle;   /* Cycle number 0..31 */
+   LrfscDrvrConfigArray Array;   /* Configuration array */
  } LrfscDrvrConfigBuf;
 
 /* ------------------------------------ */
@@ -275,7 +264,6 @@ typedef struct {
    unsigned long                Size;   /* Set your buffer size in IQ Pairs */
    LrfscDrvrPulse               Pulse;  /* Set the pulse */
    LrfscDrvrDiagSignalChoice	Choice;	/* Set your choice of signal */
-   unsigned long                Cycle;  /* Set the cycle number 0..31 you want */
    
    unsigned long                SkipStart;  /* Returns Start of acquisition */
    unsigned long                SkipCount;  /* Returns Distance between samples */
