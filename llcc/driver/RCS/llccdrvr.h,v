@@ -1,0 +1,263 @@
+head	1.6;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2005.05.19.15.21.48;	author ikozsar;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.02.10.10.54.10;	author ikozsar;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2003.03.07.17.35.05;	author ikozsar;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.02.17.16.13.03;	author ikozsar;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.02.16.18.43.55;	author ikozsar;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.02.07.15.01.29;	author ikozsar;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@Prob compile
+@
+text
+@/***************************************************************************/
+/* Llcc Device driver                                                      */
+/* Feb 2003                                                                */
+/* Ioan Kozsar                                                             */
+/***************************************************************************/
+
+/* Dont define the module more than once                                   */
+
+#ifndef LLCCDRVR
+#define LLCCDRVR
+
+
+/***************************************************************************/
+/* Constants                                                               */
+/***************************************************************************/
+
+#define LlccDrvrMODULE_CONTEXTS 16      /* 16 modules max. to be installed  */
+#define LlccDrvrCLIENT_CONTEXTS 16      /* Max number of open file handlers */
+#define LlccDrvrMODULE_CHANNELS 8       /* Number of chanels on the card    */
+
+typedef struct {
+   unsigned long Module;   /* The module number 1..n     */
+ } LlccDrvrConnection;
+
+typedef struct {
+   LlccDrvrConnection Connection;
+ } LlccDrvrReadBuf;
+
+/* ***************************************************** */
+/* Raw IO                                                */
+
+typedef struct {
+   unsigned long Size;      /* Number long to read/write */
+   unsigned long Offset;    /* Long offset address space */
+   unsigned long *UserArray;/* Callers data area for  IO */
+ } LlccDrvrRawIoBlock;
+
+
+/************************/
+/* IO Control functions */
+/************************/
+
+typedef enum {
+		LlccDrvrSET_DEBUG,				/* Switch debug trace mode ON/OFF	 */
+		LlccDrvrSET_MODULE,				/* Set module for read/write		 */
+		LlccDrvrGET_MODULE,				/* Get module for read/write		 */
+		LlccDrvrCONNECT,				/* Connect to interrupt */
+		LlccDrvrDISCONNECT,				/* Connect to interrupt */
+		LlccDrvrGET_IRQ_VECTOR,			/* Get vector of module			 */
+		LlccDrvrSET_IRQ_ENABLE,			/* Set interrupt enable			 */
+		LlccDrvrGET_IRQ_ENABLE,			/* Get interrupt status			 */
+		LlccDrvrRESET_ALL,				/* Reset the module      		 */
+		LlccDrvrREQUEST,				/* Request a synchronized IO operation */
+		LlccDrvrSATURATION,				/* Saturation control */
+		LlccDrvrINTERRUPTS,				/* Gets the number of interrupts */
+		LlccDrvrSET_OUT_SWITCH,			/* Analog Switches - test pos */
+		LlccDrvrGET_OUT_SWITCH,
+		LlccDrvrSET_REF_SWITCH,
+		LlccDrvrGET_REF_SWITCH,
+		LlccDrvrSET_FWD_SWITCH,
+		LlccDrvrGET_FWD_SWITCH,
+		LlccDrvrSET_CAV_SWITCH,
+		LlccDrvrGET_CAV_SWITCH,
+		LlccDrvrSET_MAINLOOP_SWITCH,	/* Software Switches */
+		LlccDrvrGET_MAINLOOP_SWITCH,
+		LlccDrvrSET_RAM_SELECT,			/* Ram Select */
+		LlccDrvrGET_RAM_SELECT,
+		LlccDrvrSET_DIAG1_SELECT,		/* Diagnostics channels */
+		LlccDrvrGET_DIAG1_SELECT,
+		LlccDrvrSET_DIAG2_SELECT,
+		LlccDrvrGET_DIAG2_SELECT,
+		LlccDrvrSET_DIAG3_SELECT,
+		LlccDrvrGET_DIAG3_SELECT,
+		LlccDrvrSET_DIAG4_SELECT,
+		LlccDrvrGET_DIAG4_SELECT,
+		LlccDrvrGET_RES_CONTROL,	/* Resonance Control Value */
+		LlccDrvrSET_REF_MATRIX_A,	/* REF : A, B, C, D matrix */
+		LlccDrvrGET_REF_MATRIX_A,
+		LlccDrvrSET_REF_MATRIX_B,
+		LlccDrvrGET_REF_MATRIX_B,
+		LlccDrvrSET_REF_MATRIX_C,
+		LlccDrvrGET_REF_MATRIX_C,
+		LlccDrvrSET_REF_MATRIX_D,
+		LlccDrvrGET_REF_MATRIX_D,
+		LlccDrvrSET_FWD_MATRIX_A,	/* FWD : A, B, C, D matrix */
+		LlccDrvrGET_FWD_MATRIX_A,
+		LlccDrvrSET_FWD_MATRIX_B,
+		LlccDrvrGET_FWD_MATRIX_B,
+		LlccDrvrSET_FWD_MATRIX_C,
+		LlccDrvrGET_FWD_MATRIX_C,
+		LlccDrvrSET_FWD_MATRIX_D,
+		LlccDrvrGET_FWD_MATRIX_D,
+		LlccDrvrSET_CAV_MATRIX_A,	/* CAV : A, B, C, D matrix */
+		LlccDrvrGET_CAV_MATRIX_A,
+		LlccDrvrSET_CAV_MATRIX_B,
+		LlccDrvrGET_CAV_MATRIX_B,
+		LlccDrvrSET_CAV_MATRIX_C,
+		LlccDrvrGET_CAV_MATRIX_C,
+		LlccDrvrSET_CAV_MATRIX_D,
+		LlccDrvrGET_CAV_MATRIX_D,
+		LlccDrvrSET_DIAGTIME,
+		LlccDrvrGET_DIAGTIME,
+		LlccDrvrGET_REF_DIAG_I,		/* Snapshots */
+		LlccDrvrGET_REF_DIAG_Q,
+		LlccDrvrGET_FWD_DIAG_I,
+		LlccDrvrGET_FWD_DIAG_Q,
+		LlccDrvrGET_CAV_DIAG_I,
+		LlccDrvrGET_CAV_DIAG_Q,
+		LlccDrvrGET_ERR_DIAG_I,
+		LlccDrvrGET_ERR_DIAG_Q,
+		LlccDrvrGET_LRN_DIAG_I,
+		LlccDrvrGET_LRN_DIAG_Q,
+		LlccDrvrGET_OUT_DIAG_I,
+		LlccDrvrGET_OUT_DIAG_Q,
+		LlccDrvrSET_KP,				/* Proportional gain of PI controller */
+		LlccDrvrGET_KP,
+		LlccDrvrSET_KI,				/* Integral gain of PI controller */
+		LlccDrvrGET_KI,
+		LlccDrvrGET_IP_OUT,			/* Output of the PI controller */
+		LlccDrvrGET_QP_OUT,
+		LlccDrvrGET_II_OUT,
+		LlccDrvrGET_QI_OUT,
+		LlccDrvrGET_RFOFFTIME,		/* RFOFFTIME */
+//		LlccDrvrSET_KLYSGAINSP,		/* Klystron Gain Set Point */
+//		LlccDrvrGET_KLYSGAINSP,
+		LlccDrvrRAW_READ,		/* Read					 */
+		LlccDrvrRAW_WRITE,		/* Write				 */
+		LlccGET_DRIVER_VERSION,
+		LlccDrvrLAST_IOCTL
+   } LlccDrvrControlFunction;
+
+#endif
+@
+
+
+1.5
+log
+@*** empty log message ***
+@
+text
+@d54 1
+@
+
+
+1.4
+log
+@*** empty log message ***
+@
+text
+@d12 1
+d44 12
+a55 9
+		LlccDrvrSET_DEBUG,		/* Switch debug trace mode ON/OFF	 */
+		LlccDrvrSET_MODULE,		/* Set module for read/write		 */
+		LlccDrvrGET_MODULE,		/* Get module for read/write		 */
+		LlccDrvrCONNECT,		/* Connect to interrupt, enable interrupts */
+		LlccDrvrGET_IRQ_VECTOR,		/* Get vector of module			 */
+		LlccDrvrSET_IRQ_ENABLE,		/* Get vector of module			 */
+		LlccDrvrGET_IRQ_ENABLE,		/* Get vector of module			 */
+		LlccDrvrRESET_ALL,		/* Reset the module      		 */
+		LlccDrvrSET_OUT_SWITCH,
+d63 3
+a65 1
+		LlccDrvrSET_RAM_SELECT,
+d67 1
+a67 1
+		LlccDrvrSET_DIAG1_SELECT,
+d75 50
+@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@d28 9
+d43 28
+a70 16
+		LlccDrvrSET_DEBUG,       /* Switch debug trace mode ON/OFF          */
+		LlccDrvrSET_MODULE,      /* Set module for read/write               */
+		LlccDrvrGET_MODULE,      /* Get module for read/write               */
+		LlccDrvrSET_CHANNEL,     /* Set channel (1 to 8) within a module    */
+		LlccDrvrGET_CHANNEL,     /* Get channel (1 to 8) within a module    */
+		LlccDrvrSET_DELAY,       /* Set delay (0 to 255) for the current    */
+		LlccDrvrGET_DELAY,       /* Get module-channel delay                */
+		LlccDrvrCONNECT,	 /* Connect to interrupt, enable interrupts */
+		LlccDrvrGET_VECTOR,	 /* Get vector of module */
+		LlccDrvrGET_STATUS,      /* Get status of interrupts */
+		LlccDrvrRESET_ALL,       /* Reset interrupt registers */
+		LlccDrvrINC_DELAY,
+		LlccDrvrDEC_DELAY,
+		LlccDrvrSET_GATE,        /* Set module-channel mode (On/Off, etc.)  */
+		LlccDrvrGET_GATE,        /* Get module-channel mode                 */
+		LlccDrvrGET_MODULE_TYPE,
+@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@d42 1
+d44 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d20 8
+d41 2
+@
